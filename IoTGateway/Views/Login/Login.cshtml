@@ -1,5 +1,4 @@
 ﻿@model IoTGateway.ViewModel.HomeVMs.LoginVM
-
 @{
     Layout = null;
     int bgnumber = new Random().Next(1, 6);
@@ -37,7 +36,6 @@
     <div class="loginBody app-login-back-@bgnumber" style="flex: 1 1 auto !important; ">
         <header class="login-header">
             <img src="/images/logo.png" alt="" height="48">
-            <img src="/images/wxgroup.png" alt="" style="float:right" height="150">
         </header>
         <div class="login-content">
             <div class="login-form">
@@ -70,9 +68,9 @@
                             <span class="login-error">@Model.MSD.GetFirstError()</span>
                             <button type="submit" class="login-button" style="cursor:pointer">@Model.Localizer["Login.Login"]</button>
 
-                            <div class="login-button" style="cursor:pointer">
+                            @* <div class="login-button" style="cursor:pointer">
                                 <a href="http://iotgateway.net/docs/enterprise/intro" target="_blank">企业版</a>
-                            </div>
+                            </div> *@
                             
                             @*<wt:linkbutton window-title="@Model.Localizer["Login.Register"]" class="login-button" style="cursor:pointer" target="ButtonTargetEnum.Layer" window-width="500" window-height="500" url="/Login/Reg" text="@Model.Localizer["Login.Register"]" />*@
                         </li>
