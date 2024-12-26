@@ -37,5 +37,18 @@ namespace IoTGateway.Areas.API
                 .OrderBy(x => x.Index).ToListAsync());
 
         }
+
+        /// <summary>
+        /// 控制设备值
+        /// </summary>
+        /// <returns></returns>
+        [Public]
+        [HttpPost("Device/ControlDevices")]
+        public async Task<IActionResult>  ControlDevices()
+        {;
+            return Ok(await DC.Set<Device>().Include(x => x.Driver).Where(x => x.ParentId != null).AsNoTracking()
+                .OrderBy(x => x.Index).ToListAsync());
+
+        }
     }
 }

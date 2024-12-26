@@ -30,6 +30,9 @@
 		<ProjectReference Include="..\IoTGateway.ViewModel\IoTGateway.ViewModel.csproj" />
 		<ProjectReference Include="..\WalkingTec.Mvvm\WalkingTec.Mvvm.Mvc\WalkingTec.Mvvm.Mvc.csproj" />
 		<ProjectReference Include="..\WalkingTec.Mvvm\WalkingTec.Mvvm.TagHelpers.LayUI\WalkingTec.Mvvm.TagHelpers.LayUI.csproj" />
+		<ProjectReference Include="..\Plugins\DriverTest\DriverTest.csproj">
+		  <GlobalPropertiesToRemove></GlobalPropertiesToRemove>
+		</ProjectReference>
 	</ItemGroup>
 
 	<ItemGroup>

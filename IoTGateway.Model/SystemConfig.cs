@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 using WalkingTec.Mvvm.Core;
 
@@ -13,7 +13,7 @@ namespace IoTGateway.Model
 
         [Comment("ClientId")]
         [Display(Name = "ClientId")]
-        public string ClientId { get; set; }
+        public string? ClientId { get; set; }
 
         [Comment("Mqtt服务器")]
         [Display(Name = "MqttServer ")]
@@ -34,19 +34,27 @@ namespace IoTGateway.Model
         [Comment("输出平台")]
         [Display(Name = "OutputPlatform")]
         public IoTPlatformType IoTPlatformType { get; set; }
+
+        [Comment("HTTP/WebSocket端点")]
+        [Display(Name = "Endpoint")]
+        public string? HttpEndpoint { get; set; }
+
+        [Comment("认证令牌")]
+        [Display(Name = "Token")]
+        public string? GatewayToken { get; set; }
     }
     public enum IoTPlatformType
     {
         [Display(Name = "ThingsBoard")]
-        ThingsBoard =0,
+        ThingsBoard = 0,
         [Display(Name = "IoTSharp")]
-        IoTSharp =1,
+        IoTSharp = 1,
         [Display(Name = "AliIoT")]
-        AliCloudIoT=2,
+        AliCloudIoT = 2,
         [Display(Name = "TencentIoTHub")]
-        TencentIoTHub =3,
+        TencentIoTHub = 3,
         [Display(Name = "BaiduIoTCore")]
-        BaiduIoTCore =4,
+        BaiduIoTCore = 4,
         [Display(Name = "OneNet")]
         OneNET = 5,
         [Display(Name = "ThingsCloud")]
@@ -54,6 +62,10 @@ namespace IoTGateway.Model
         [Display(Name = "HuaWeiCloud")]
         HuaWei = 7,
         [Display(Name = "IoTGateway")]
-        IoTGateway = 8
+        IoTGateway = 8,
+        [Display(Name = "HTTP")]
+        HTTP = 9,
+        [Display(Name = "WebSocket")]
+        WebSocket = 10
     }
 }

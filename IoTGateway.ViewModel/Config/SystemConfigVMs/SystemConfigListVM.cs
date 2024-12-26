@@ -39,6 +39,8 @@ namespace IoTGateway.ViewModel.Config.SystemConfigVMs
                 this.MakeGridHeader(x => x.MqttPort),
                 this.MakeGridHeader(x => x.MqttUName),
                 this.MakeGridHeader(x => x.MqttUPwd),
+                this.MakeGridHeader(x => x.HttpEndpoint),
+                this.MakeGridHeader(x => x.GatewayToken),
                 this.MakeGridHeaderAction(width: 200)
             };
         }
@@ -55,6 +57,8 @@ namespace IoTGateway.ViewModel.Config.SystemConfigVMs
                     MqttPort = x.MqttPort,
                     MqttUName = x.MqttUName,
                     MqttUPwd = x.MqttUPwd,
+                    HttpEndpoint = x.HttpEndpoint,
+                    GatewayToken = x.GatewayToken,
                     IoTPlatformType = x.IoTPlatformType,
                 })
                 .OrderBy(x => x.ID);

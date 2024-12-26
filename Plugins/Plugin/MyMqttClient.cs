@@ -1,4 +1,4 @@
-﻿using MQTTnet;
+using MQTTnet;
 using MQTTnet.Client;
 using Newtonsoft.Json;
 using PluginInterface;
@@ -11,26 +11,36 @@ using PluginInterface.HuaWeiRoma;
 using PluginInterface.ThingsBoard;
 using Microsoft.Extensions.Logging;
 using MQTTnet.Extensions.ManagedClient;
+using System.Net.Http;
+using System.Text;
+using System.Threading.Tasks;
+using System.Net.WebSockets;
+using System.Threading;
 
 namespace Plugin
 {
     public class MyMqttClient
     {
         private readonly ILogger<MyMqttClient> _logger;
+        private readonly HttpClient _httpClient;
+        private ClientWebSocket? _webSocket;
+        private bool _isWebSocketConnected;
+        private readonly CancellationTokenSource _webSocketCts;
         //private readonly ReferenceNodeManager? _uaNodeManager;
 
         private SystemConfig _systemConfig;
         private ManagedMqttClientOptions _options;
-        public bool IsConnected => (Client.IsConnected);
+        public bool IsConnected => (_systemConfig.IoTPlatformType == IoTPlatformType.WebSocket ? _isWebSocketConnected : Client.IsConnected);
         private IManagedMqttClient? Client { get; set; }
         public event EventHandler<RpcRequest> OnExcRpc;
         public event EventHandler<ISAttributeResponse> OnReceiveAttributes;
         private readonly string _tbRpcTopic = "v1/gateway/rpc";
 
-        //UAService uaService, 
         public MyMqttClient(ILogger<MyMqttClient> logger)
         {
             _logger = logger;
+            _httpClient = new HttpClient();
+            _webSocketCts = new CancellationTokenSource();
             //_uaNodeManager = uaService.server.m_server.nodeManagers[0] as ReferenceNodeManager;
 
             StartClientAsync().Wait();
@@ -40,45 +50,148 @@ namespace Plugin
         {
             try
             {
-                if (Client != null)
-                {
-                    Client.Dispose();
-                }
-                Client = new MqttFactory().CreateManagedMqttClient();
                 await using var dc = new DataContext(IoTBackgroundService.connnectSetting, IoTBackgroundService.DbType);
                 _systemConfig = dc.Set<SystemConfig>().First();
 
-                #region ClientOptions
+                if (_systemConfig.IoTPlatformType == IoTPlatformType.WebSocket)
+                {
+                    await InitializeWebSocketConnection();
+                }
+                else
+                {
+                    if (Client != null)
+                    {
+                        Client.Dispose();
+                    }
+                    Client = new MqttFactory().CreateManagedMqttClient();
 
-                _options = new ManagedMqttClientOptionsBuilder()
-                    .WithAutoReconnectDelay(TimeSpan.FromSeconds(5))
-                    .WithMaxPendingMessages(100000)
-                    .WithClientOptions(new MqttClientOptionsBuilder()
-                        .WithClientId(string.IsNullOrEmpty(_systemConfig.ClientId)
-                            ? Guid.NewGuid().ToString()
-                            : _systemConfig.ClientId)
-                        .WithTcpServer(_systemConfig.MqttIp, _systemConfig.MqttPort)
-                        .WithCredentials(_systemConfig.MqttUName, _systemConfig.MqttUPwd)
-                        .WithTimeout(TimeSpan.FromSeconds(30))
-                        .WithKeepAlivePeriod(TimeSpan.FromSeconds(60))
-                        .WithProtocolVersion(MqttProtocolVersion.V311)
-                        .WithCleanSession(true)
-                        .Build())
-                    .Build();
-                #endregion
+                    #region ClientOptions
 
-                Client.ConnectedAsync += Client_ConnectedAsync;
-                Client.DisconnectedAsync += Client_DisconnectedAsync;
-                Client.ApplicationMessageReceivedAsync += Client_ApplicationMessageReceivedAsync;
+                    _options = new ManagedMqttClientOptionsBuilder()
+                        .WithAutoReconnectDelay(TimeSpan.FromSeconds(5))
+                        .WithMaxPendingMessages(100000)
+                        .WithClientOptions(new MqttClientOptionsBuilder()
+                            .WithClientId(string.IsNullOrEmpty(_systemConfig.ClientId)
+                                ? Guid.NewGuid().ToString()
+                                : _systemConfig.ClientId)
+                            .WithTcpServer(_systemConfig.MqttIp, _systemConfig.MqttPort)
+                            .WithCredentials(_systemConfig.MqttUName, _systemConfig.MqttUPwd)
+                            .WithTimeout(TimeSpan.FromSeconds(30))
+                            .WithKeepAlivePeriod(TimeSpan.FromSeconds(60))
+                            .WithProtocolVersion(MqttProtocolVersion.V311)
+                            .WithCleanSession(true)
+                            .Build())
+                        .Build();
+                    #endregion
 
-                await Client.StartAsync(_options);
+                    Client.ConnectedAsync += Client_ConnectedAsync;
+                    Client.DisconnectedAsync += Client_DisconnectedAsync;
+                    Client.ApplicationMessageReceivedAsync += Client_ApplicationMessageReceivedAsync;
 
-                _logger.LogInformation("MQTT WAITING FOR APPLICATION MESSAGES");
+                    await Client.StartAsync(_options);
 
+                    _logger.LogInformation("MQTT WAITING FOR APPLICATION MESSAGES");
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"StartManagedClientAsync FAILED ");
+                _logger.LogError(ex, $"StartClientAsync FAILED ");
+            }
+        }
+
+        private async Task InitializeWebSocketConnection()
+        {
+            try
+            {
+                if (_webSocket != null)
+                {
+                    await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Reconnecting", _webSocketCts.Token);
+                    _webSocket.Dispose();
+                }
+
+                _webSocket = new ClientWebSocket();
+                
+                // 添加认证头（如果需要）
+                if (!string.IsNullOrEmpty(_systemConfig.GatewayToken))
+                {
+                    _webSocket.Options.SetRequestHeader("Authorization", $"Bearer {_systemConfig.GatewayToken}");
+                }
+
+                var uri = new Uri(_systemConfig.HttpEndpoint);
+                await _webSocket.ConnectAsync(uri, _webSocketCts.Token);
+                _isWebSocketConnected = true;
+                _logger.LogInformation("WebSocket connected successfully");
+
+                // 启动接收消息的后台任务
+                _ = Task.Run(async () => await ReceiveWebSocketMessages(), _webSocketCts.Token);
+            }
+            catch (Exception ex)
+            {
+                _isWebSocketConnected = false;
+                _logger.LogError(ex, "Failed to initialize WebSocket connection");
+                throw;
+            }
+        }
+
+        private async Task ReceiveWebSocketMessages()
+        {
+            var buffer = new byte[4096];
+            try
+            {
+                while (_webSocket.State == WebSocketState.Open && !_webSocketCts.Token.IsCancellationRequested)
+                {
+                    var result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), _webSocketCts.Token);
+                    
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", _webSocketCts.Token);
+                        _isWebSocketConnected = false;
+                        break;
+                    }
+
+                    var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    _logger.LogDebug($"Received WebSocket message: {message}");
+                    // 处理接收到的消息
+                }
+            }
+            catch (Exception ex)
+            {
+                _isWebSocketConnected = false;
+                _logger.LogError(ex, "Error in WebSocket receive loop");
+            }
+        }
+
+        private async Task PublishTelemetryViaWebSocketAsync(string deviceName, Dictionary<string, List<PayLoad>> sendModel)
+        {
+            try
+            {
+                if (_webSocket?.State != WebSocketState.Open)
+                {
+                    await InitializeWebSocketConnection();
+                }
+
+                var message = JsonConvert.SerializeObject(new
+                {
+                    type = "telemetry",
+                    device = deviceName,
+                    data = sendModel
+                });
+
+                var messageBytes = Encoding.UTF8.GetBytes(message);
+                await _webSocket.SendAsync(
+                    new ArraySegment<byte>(messageBytes),
+                    WebSocketMessageType.Text,
+                    true,
+                    _webSocketCts.Token
+                );
+
+                _logger.LogInformation($"Successfully published telemetry via WebSocket for device {deviceName}");
+            }
+            catch (Exception ex)
+            {
+                _isWebSocketConnected = false;
+                _logger.LogError(ex, $"Failed to publish telemetry via WebSocket for device {deviceName}");
+                throw;
             }
         }
 
@@ -540,7 +653,6 @@ namespace Plugin
                                     await UploadIsTelemetryDataAsync(deviceName, payload.Values);
                                 }
                             }
-
                             break;
                         case IoTPlatformType.ThingsCloud:
                             foreach (var payload in sendModel[deviceName])
@@ -548,7 +660,6 @@ namespace Plugin
                                 if (payload.Values != null)
                                     await UploadTcTelemetryDataAsync(deviceName, payload.Values);
                             }
-
                             break;
                         case IoTPlatformType.HuaWei:
                             foreach (var payload in sendModel[deviceName])
@@ -556,9 +667,13 @@ namespace Plugin
                                 if (payload.Values != null)
                                     await UploadHwTelemetryDataAsync(device, payload.Values);
                             }
-
                             break;
-
+                        case IoTPlatformType.HTTP:
+                            await PublishTelemetryViaHttpAsync(deviceName, sendModel);
+                            break;
+                        case IoTPlatformType.WebSocket:
+                            await PublishTelemetryViaWebSocketAsync(deviceName, sendModel);
+                            break;
                         case IoTPlatformType.AliCloudIoT:
                         case IoTPlatformType.TencentIoTHub:
                         case IoTPlatformType.BaiduIoTCore:
@@ -567,21 +682,28 @@ namespace Plugin
                             break;
                     }
                 }
-
-                //foreach (var payload in sendModel[deviceName])
-                //{
-                //    if (payload.Values != null)
-                //        foreach (var kv in payload.Values)
-                //        {
-                //            //更新到UAService
-                //            _uaNodeManager?.UpdateNode($"{device.Parent.DeviceName}.{deviceName}.{kv.Key}",
-                //                kv.Value);
-                //        }
-                //}
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"PublishTelemetryAsync Error");
+            }
+        }
+
+        private async Task PublishTelemetryViaHttpAsync(string deviceName, Dictionary<string, List<PayLoad>> sendModel)
+        {
+            var url = $"{_systemConfig.HttpEndpoint}/api/v1/{_systemConfig.GatewayToken}/telemetry";
+            var content = new StringContent(JsonConvert.SerializeObject(sendModel), Encoding.UTF8, "application/json");
+
+            try
+            {
+                var response = await _httpClient.PostAsync(url, content);
+                response.EnsureSuccessStatusCode();
+                _logger.LogInformation($"Successfully published telemetry via HTTP for device {deviceName}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to publish telemetry via HTTP for device {deviceName}");
+                throw;
             }
         }
 
@@ -623,9 +745,7 @@ namespace Plugin
                             {
                                 new DeviceStatus()
                                 {
-                                    DeviceId = device.DeviceConfigs
-                                        .FirstOrDefault(x => x.DeviceConfigName == "DeviceId")
-                                        ?.Value,
+                                    DeviceId = device.DeviceConfigs.FirstOrDefault(x => x.DeviceConfigName == "DeviceId")?.Value,
                                     Status = "ONLINE"
                                 }
                             }
@@ -678,9 +798,7 @@ namespace Plugin
                             {
                                 new DeviceStatus()
                                 {
-                                    DeviceId = device.DeviceConfigs
-                                        .FirstOrDefault(x => x.DeviceConfigName == "DeviceId")
-                                        ?.Value,
+                                    DeviceId = device.DeviceConfigs.FirstOrDefault(x => x.DeviceConfigName == "DeviceId")?.Value,
                                     Status = "OFFLINE"
                                 }
                             }

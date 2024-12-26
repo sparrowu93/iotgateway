@@ -224,6 +224,7 @@ namespace IoTGateway.Controllers
             return PartialView(vm);
         }
 
+        // TODO use API
         [HttpPost]
         [ActionDescription("下发确认按钮")]
         public ActionResult DoSetValue()

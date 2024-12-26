@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <OutputPath>..\..\..\IoTGateway\bin\Debug\net6.0\drivers</OutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="lib60870.NET" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+		<ProjectReference Include="..\..\PluginInterface\PluginInterface.csproj" />
+  </ItemGroup>
+
+</Project>
