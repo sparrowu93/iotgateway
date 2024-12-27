@@ -1,68 +1,108 @@
-﻿using System;
+using System;
 using System.Threading;
 using Microsoft.Extensions.Logging;
-using DriverIEC60870;
 using PluginInterface;
+using TCP.Parser;
+using DriverTest;
 
 class Program
 {
     static void Main(string[] args)
     {
-        // Setup logger (you might want to use a proper logging framework in a real application)
+        // Setup logger
         ILogger logger = new ConsoleLogger();
 
-        // Create an instance of IEC60870Client
-        IEC60870Client client = new IEC60870Client("TestDevice", logger)
+        // Create an instance of TCPParser
+        TCPParser parser = new TCPParser("TestDevice", logger)
         {
-            IpAddress = "192.168.10.5", // Replace with your server's IP
-            Port = 2404,
-            AsduAddress = 1,
-            Timeout = 5000,
-            MinPeriod = 1000
+            IpAddress = "127.0.0.1",
+            Port = 15021,
+            Timeout = 3000,
+            MinPeriod = 100  // Reduced for faster testing
         };
 
-        Console.WriteLine("IEC60870 Client Console Application");
-        Console.WriteLine("===================================");
+        Console.WriteLine("TCP Parser Test Application");
+        Console.WriteLine("==========================");
 
-        // Connect to the server
-        if (client.Connect())
+        // Test cases for different data types and formats
+        TestTcpParser(parser);
+
+        Console.WriteLine("\nTests completed. Press Enter to exit...");
+        try
         {
-            Console.WriteLine("Connected successfully.");
-
-            // Main loop
-            bool running = true;
-            while (running)
-            {
-                DriverAddressIoArgModel argModel = new DriverAddressIoArgModel
-                {
-                    Address = "MMEF_11"
-                };
-                DriverReturnValueModel drm = client.Read(argModel);
-                Console.WriteLine($"{drm.Message} {drm.Value}");
-                
-                DriverAddressIoArgModel argModel1 = new DriverAddressIoArgModel
-                {
-                    Address = "SP_10"
-                };
-                DriverReturnValueModel drm1 = client.Read(argModel1);
-                Console.WriteLine($"{drm1.Message} {drm1.Value}");
-                Thread.Sleep(1000);
-            }
-
-            // Disconnect
-            client.Close();
-            Console.WriteLine("Disconnected from the server.");
+            Console.ReadLine();
         }
-        else
+        catch
         {
-            Console.WriteLine("Failed to connect to the server.");
+            // If running without console, just exit
         }
-
-        Console.WriteLine("Press any key to exit...");
-        Console.ReadKey();
     }
 
-    static void PerformRead(IEC60870Client client)
+    static void TestTcpParser(TCPParser parser)
+    {
+        if (!parser.Connect())
+        {
+            Console.WriteLine("Failed to connect to the server.");
+            return;
+        }
+
+        Console.WriteLine("Connected successfully.");
+        
+        try
+        {
+            // Wait for data to be received
+            Thread.Sleep(500);
+
+            // Test case 1: Read 2 bytes as Int16
+            TestRead(parser, "0,2", DataTypeEnum.Int16, "Reading 2 bytes as Int16");
+
+            // Test case 2: Read 4 bytes as Float with 2 decimal places
+            TestRead(parser, "2,4,2", DataTypeEnum.Float, "Reading 4 bytes as Float with 2 decimal places");
+
+            // Test case 3: Read string data with different encodings
+            TestRead(parser, "6,10,ascii", DataTypeEnum.AsciiString, "Reading ASCII string");
+            TestRead(parser, "6,10,utf8", DataTypeEnum.AsciiString, "Reading UTF8 string");
+            TestRead(parser, "6,10,hex", DataTypeEnum.AsciiString, "Reading string as HEX");
+
+            // Test case 4: Read from position to end
+            TestRead(parser, "16,-1", DataTypeEnum.AsciiString, "Reading from position 16 to end");
+
+            // Test case 5: Test boundary cases
+            TestRead(parser, "0,1", DataTypeEnum.Bool, "Reading single byte as Bool");
+            TestRead(parser, "0,8", DataTypeEnum.Int64, "Reading 8 bytes as Int64");
+
+            // Test case 6: Test error cases
+            TestRead(parser, "999,1", DataTypeEnum.Byte, "Testing out of bounds read");
+            TestRead(parser, "0", DataTypeEnum.Byte, "Testing invalid address format");
+        }
+        finally
+        {
+            parser.Close();
+            Console.WriteLine("Connection closed.");
+        }
+    }
+
+    static void TestRead(TCPParser parser, string address, DataTypeEnum dataType, string description)
+    {
+        Console.WriteLine($"\nTest: {description}");
+        Console.WriteLine($"Address: {address}, Type: {dataType}");
+
+        var ioArg = new DriverAddressIoArgModel 
+        { 
+            Address = address,
+            ValueType = dataType
+        };
+
+        var result = parser.Read(ioArg);
+        Console.WriteLine($"Status: {result.StatusType}");
+        Console.WriteLine($"Value: {result.Value}");
+        if (!string.IsNullOrEmpty(result.Message))
+        {
+            Console.WriteLine($"Message: {result.Message}");
+        }
+    }
+
+    static void PerformRead(TCPParser client)
     {
         Console.Write("Enter the address to read (e.g., SP_1): ");
         string address = Console.ReadLine();

@@ -8,7 +8,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Drivers\IEC.C104Client\IEC.C104Client.csproj" />
+      <ProjectReference Include="..\PluginInterface\PluginInterface.csproj" />
+      <!-- <ProjectReference Include="..\Drivers\IEC.C104Client\IEC.C104Client.csproj" /> -->
+      <ProjectReference Include="..\Drivers\TCP.Parser\TCP.Parser.csproj" />
     </ItemGroup>
 
 </Project>
