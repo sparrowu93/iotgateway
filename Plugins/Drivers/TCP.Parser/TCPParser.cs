@@ -22,7 +22,7 @@ namespace TCP.Parser
         private readonly string _device;
 
         #region 测试辅助方法
-        internal void SetTestData(byte[] data)
+        public void SetTestData(byte[] data)
         {
             _latestData = data;
         }
@@ -46,6 +46,9 @@ namespace TCP.Parser
 
         [ConfigParameter("最小通讯周期ms")] 
         public uint MinPeriod { get; set; } = 100;
+
+        [ConfigParameter("端序类型")] 
+        public EndianEnum EndianType { get; set; } = EndianEnum.BigEndian;
 
         #endregion
 
@@ -206,10 +209,112 @@ namespace TCP.Parser
                 return ret;
             }
 
-            return ParseData(ioarg, _latestData);
+            try
+            {
+                // 检查是否是JSON格式的地址（以json:开头）
+                if (ioarg.Address.StartsWith("json:", StringComparison.OrdinalIgnoreCase))
+                {
+                    string jsonPath = ioarg.Address.Substring(5); // 移除"json:"前缀
+                    string jsonString = Encoding.UTF8.GetString(_latestData);
+                    
+                    try
+                    {
+                        using (JsonDocument jsonDoc = JsonDocument.Parse(jsonString))
+                        {
+                            JsonElement element = jsonDoc.RootElement;
+                            
+                            // 如果指定了JSON路径
+                            if (!string.IsNullOrEmpty(jsonPath))
+                            {
+                                foreach (string path in jsonPath.Split('.'))
+                                {
+                                    // 处理数组索引，例如: sensors[0]
+                                    if (path.Contains("[") && path.Contains("]"))
+                                    {
+                                        string arrayName = path.Substring(0, path.IndexOf("["));
+                                        string indexStr = path.Substring(path.IndexOf("[") + 1, path.IndexOf("]") - path.IndexOf("[") - 1);
+                                        
+                                        if (int.TryParse(indexStr, out int index))
+                                        {
+                                            element = element.GetProperty(arrayName)[index];
+                                        }
+                                        else
+                                        {
+                                            throw new ArgumentException($"无效的数组索引: {path}");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        element = element.GetProperty(path);
+                                    }
+                                }
+                            }
+
+                            // 根据数据类型转换JSON值
+                            ret.Value = ConvertJsonValue(element, ioarg.ValueType);
+                        }
+                    }
+                    catch (JsonException ex)
+                    {
+                        ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                        ret.Message = $"JSON解析错误: {ex.Message}";
+                        return ret;
+                    }
+                }
+                else
+                {
+                    // 原有的字节解析逻辑
+                    string[] parts = ioarg.Address.Split(',');
+                    if (parts.Length < 2)
+                    {
+                        ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                        ret.Message = "地址格式错误，应为：起始位置,长度[,格式化参数]";
+                        return ret;
+                    }
+
+                    if (!int.TryParse(parts[0], out int start) || start < 0)
+                    {
+                        ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                        ret.Message = "无效的起始位置";
+                        return ret;
+                    }
+
+                    if (!int.TryParse(parts[1], out int length) || length < 0)
+                    {
+                        ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                        ret.Message = "无效的长度";
+                        return ret;
+                    }
+
+                    string format = parts.Length > 2 ? parts[2] : string.Empty;
+
+                    if (length == -1)
+                    {
+                        length = _latestData.Length - start;
+                    }
+
+                    if (start + length > _latestData.Length)
+                    {
+                        ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                        ret.Message = "数据长度超出范围";
+                        return ret;
+                    }
+
+                    byte[] fieldData = new byte[length];
+                    Array.Copy(_latestData, start, fieldData, 0, length);
+                    ret.Value = ParseValueByType(fieldData, ioarg.ValueType, format);
+                }
+            }
+            catch (Exception ex)
+            {
+                ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                ret.Message = $"解析失败: {ex.Message}";
+            }
+
+            return ret;
         }
 
-        internal DriverReturnValueModel TestRead(DriverAddressIoArgModel ioarg)
+        public DriverReturnValueModel TestRead(DriverAddressIoArgModel ioarg)
         {
             return ParseData(ioarg, _latestData);
         }
@@ -311,78 +416,131 @@ namespace TCP.Parser
             return ret;
         }
 
+        private byte[] HandleEndian(byte[] data)
+        {
+            if (data == null || data.Length == 0)
+                return data;
+
+            switch (EndianType)
+            {
+                case EndianEnum.BigEndian:
+                    if (BitConverter.IsLittleEndian)
+                    {
+                        var tempData = new byte[data.Length];
+                        Array.Copy(data, tempData, data.Length);
+                        Array.Reverse(tempData);
+                        return tempData;
+                    }
+                    break;
+                case EndianEnum.LittleEndian:
+                    if (!BitConverter.IsLittleEndian)
+                    {
+                        var tempData = new byte[data.Length];
+                        Array.Copy(data, tempData, data.Length);
+                        Array.Reverse(tempData);
+                        return tempData;
+                    }
+                    break;
+                case EndianEnum.BigEndianSwap:
+                    var swappedData = new byte[data.Length];
+                    for (int i = 0; i < data.Length; i += 2)
+                    {
+                        if (i + 1 < data.Length)
+                        {
+                            swappedData[i] = data[i + 1];
+                            swappedData[i + 1] = data[i];
+                        }
+                        else
+                        {
+                            swappedData[i] = data[i];
+                        }
+                    }
+                    if (BitConverter.IsLittleEndian)
+                    {
+                        Array.Reverse(swappedData);
+                    }
+                    return swappedData;
+                case EndianEnum.LittleEndianSwap:
+                    var swappedDataLE = new byte[data.Length];
+                    for (int i = 0; i < data.Length; i += 2)
+                    {
+                        if (i + 1 < data.Length)
+                        {
+                            swappedDataLE[i] = data[i + 1];
+                            swappedDataLE[i + 1] = data[i];
+                        }
+                        else
+                        {
+                            swappedDataLE[i] = data[i];
+                        }
+                    }
+                    if (!BitConverter.IsLittleEndian)
+                    {
+                        Array.Reverse(swappedDataLE);
+                    }
+                    return swappedDataLE;
+            }
+            
+            return data;
+        }
+
         private object ParseValueByType(byte[] data, DataTypeEnum valueType, string format)
         {
-            try
+            var processedData = HandleEndian(data);
+            switch (valueType)
             {
-                // 如果系统是小端序，需要反转字节顺序以处理大端序数据
-                if (BitConverter.IsLittleEndian)
-                {
-                    var tempData = new byte[data.Length];
-                    Array.Copy(data, tempData, data.Length);
-                    Array.Reverse(tempData);
-                    data = tempData;
-                }
+                case DataTypeEnum.Bool:
+                    return processedData[0] != 0;
 
-                switch (valueType)
-                {
-                    case DataTypeEnum.Bool:
-                        return data[0] != 0;
+                case DataTypeEnum.Byte:
+                    return processedData[0];
 
-                    case DataTypeEnum.Byte:
-                        return data[0];
+                case DataTypeEnum.Int16:
+                    return BitConverter.ToInt16(processedData, 0);
 
-                    case DataTypeEnum.Int16:
-                        return BitConverter.ToInt16(data, 0);
+                case DataTypeEnum.Uint16:
+                    return BitConverter.ToUInt16(processedData, 0);
 
-                    case DataTypeEnum.Uint16:
-                        return BitConverter.ToUInt16(data, 0);
+                case DataTypeEnum.Int32:
+                    return BitConverter.ToInt32(processedData, 0);
 
-                    case DataTypeEnum.Int32:
-                        return BitConverter.ToInt32(data, 0);
+                case DataTypeEnum.Uint32:
+                    return BitConverter.ToUInt32(processedData, 0);
 
-                    case DataTypeEnum.Uint32:
-                        return BitConverter.ToUInt32(data, 0);
+                case DataTypeEnum.Int64:
+                    return BitConverter.ToInt64(processedData, 0);
 
-                    case DataTypeEnum.Int64:
-                        return BitConverter.ToInt64(data, 0);
+                case DataTypeEnum.Uint64:
+                    return BitConverter.ToUInt64(processedData, 0);
 
-                    case DataTypeEnum.Uint64:
-                        return BitConverter.ToUInt64(data, 0);
+                case DataTypeEnum.Float:
+                    float floatValue = BitConverter.ToSingle(processedData, 0);
+                    if (!string.IsNullOrEmpty(format))
+                    {
+                        return Math.Round(floatValue, int.Parse(format));
+                    }
+                    return floatValue;
 
-                    case DataTypeEnum.Float:
-                        float floatValue = BitConverter.ToSingle(data, 0);
-                        if (!string.IsNullOrEmpty(format))
-                        {
-                            return Math.Round(floatValue, int.Parse(format));
-                        }
-                        return floatValue;
+                case DataTypeEnum.Double:
+                    double doubleValue = BitConverter.ToDouble(processedData, 0);
+                    if (!string.IsNullOrEmpty(format))
+                    {
+                        return Math.Round(doubleValue, int.Parse(format));
+                    }
+                    return doubleValue;
 
-                    case DataTypeEnum.Double:
-                        double doubleValue = BitConverter.ToDouble(data, 0);
-                        if (!string.IsNullOrEmpty(format))
-                        {
-                            return Math.Round(doubleValue, int.Parse(format));
-                        }
-                        return doubleValue;
+                case DataTypeEnum.AsciiString:
+                    return Encoding.ASCII.GetString(processedData).TrimEnd('\0');
 
-                    case DataTypeEnum.AsciiString:
-                        return Encoding.ASCII.GetString(data).TrimEnd('\0');
+                case DataTypeEnum.Utf8String:
+                    return Encoding.UTF8.GetString(processedData).TrimEnd('\0');
 
-                    case DataTypeEnum.Utf8String:
-                        return Encoding.UTF8.GetString(data).TrimEnd('\0');
+                case DataTypeEnum.DateTime:
+                    long ticks = BitConverter.ToInt64(processedData, 0);
+                    return DateTime.FromFileTime(ticks);
 
-                    case DataTypeEnum.DateTime:
-                        long ticks = BitConverter.ToInt64(data, 0);
-                        return DateTime.FromFileTime(ticks);
-
-                    default:
-                        throw new ArgumentException($"不支持的数据类型: {valueType}");
-                }
-            }
-            catch (Exception ex)
-            {
-                throw new Exception($"解析数据类型 {valueType} 时出错: {ex.Message}");
+                default:
+                    throw new ArgumentException($"不支持的数据类型: {valueType}");
             }
         }
 

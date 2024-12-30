@@ -1,6 +1,4 @@
-# IoTGateway
-
-## [在线体验 http://online.iotgateway.net](http://online.iotgateway.net/)
+# IOT 边缘网关
 
 - 用户名：`admin`     密码：`iotgateway.net`
 
@@ -14,25 +12,6 @@
 >
 > 当然也可以进行边缘计算。
 >
-
-## [Tesla引荐：https://ts.la/oidq233243](https://ts.la/oidq233243)
-## [教程文档](http://iotgateway.net/)
-## [硬件网关](http://iotgateway.net/docs/hardware/selection/)
-## [企业版](http://iotgateway.net/docs/enterprise/intro)
-
-## 运行部署
-
-| [发行包运行](http://iotgateway.net/docs/iotgateway-beginner/run/release-run) 
-| [docker运行](http://iotgateway.net/docs/iotgateway-beginner/run/docker-run) 
-| [源码运行](http://iotgateway.net/docs/iotgateway-beginner/run/source-run) 
-| [发布部署](http://iotgateway.net/docs/iotgateway-beginner/run/publish-run) 
-
-
-## 社区
-
-| 微信扫我进群 | 公众号 |    [QQ群:895199932](https://jq.qq.com/?_wv=1027&k=mus0CV0W)  |
-| ---- | ------ | ---- |
-| ![qq](./images/wxgroup.png) | ![wx](./images/wx.jpg) | ![qq](./images/qq.png) |
 
 
 ## 南向
@@ -60,7 +39,7 @@
 - 内置ModbusSlave(模拟设备)，端口503
 
 ## 展示
-- Websocker免刷新
+- Websocket 免刷新
 ![variables](./images/variables.gif)
 
 - 3D数字孪生Demo
@@ -76,72 +55,3 @@
 - 我们**接受并感谢**资金以及任何方式的的**赞助**，但并**不意味着我们会为您承诺或担保任何事情**
 - 若你使用IoTGateway**获利**，我们希望你对IoTGateway**是有贡献的**(不限于代码、文档、意见建议或力所能及的赞助)
 - 请*严格*遵循**MIT**协议
-- [企业版介绍点我](http://iotgateway.net/docs/enterprise/intro)
-
-
-
-## 获得奖项(部分)
-
-- **.NET20周年云原生开发挑战赛一等奖**
-
-- **Gitee 2022 GVP**
-
-- **OSC 2022 最火热中国开源项目社区**
-
-## 企业客户(部分)
-
-国家电网(电力)、中国移动、歌尔股份(3C)、经纬纺机(央企上市)、BOSCH(汽车零部件)、凌坤智能(AGV)、容恒、卧晨、惠斯通、益信......
-
-## 友情链接
-
-### ThingsCloud公有云
-
-项目地址：
-https://www.thingscloud.xyz/
-概述：
-ThingsCloud 在设备和用户之间建立开箱即用的云平台和云应用，实现数据采集、实时控制、数据可视化、开放 API，构建灵活强大的物联网应用。
-
-### IoTClient通讯库
-
-开源地址：
-https://github.com/zhaopeiym/IoTClient
-概述：
-这是一个基于.NET Standard 2.0物联网设备通讯协议实现客户端，包括主流PLC、Bacnet等。
-
-## 致谢
-
-Star、代码贡献、文档贡献和赞助是我持续更新的动力。
-
-感谢贡献代码的各位：**麦壳饼、谷草、老翁钓大鱼、dapeng17951、ccliushou、BenjaminChenGH、sugerlcc、wqliceman**
-
-打赏列表：
-
-| 昵称          | 金额  | 时间     |
-| ------------- | ----- | -------- |
-| TerryHj       | 8.88  | 不可考证 |
-| Amengone      | 50    | 不可考证 |
-| xiaotuxing    | 66    | 20220520 |
-| 华仔          | 28.88 | 20220524 |
-| Mr.Ethan      | 5     | 20220611 |
-| 刘金平        | 50    | 20220712 |
-| 农民也疯狂    | 600   | 20220725 |
-| .             | 10    | 20220725 |
-| Gary          | 50    | 20220808 |
-| .             | 200   | 20220902 |
-| 匿名          | 20    | 20220908 |
-| 浪上飞郑      | 10    | 20220915 |
-| SPA           | 50    | 20221119 |
-| iKuo          | 100   | 20221212 |
-| 陶白白        | 100   | 20230109 |
-| Carrey        | 100   | 20230113 |
-| MC            | 400   | 20230114 |
-| LoveChina8888 | 6.66  | 20230121 |
-| guoke         | 200   | 20230207 |
-
-
-
-## 打赏请留微信或QQ
-
-|  微信 | 支付宝 |
-| ----- | ---- |
-| ![wx-pay](./images/wx-pay.jpg) | ![ali-pay](./images/ali-pay.png) |
