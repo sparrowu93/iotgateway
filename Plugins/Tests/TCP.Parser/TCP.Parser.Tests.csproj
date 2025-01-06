@@ -16,8 +16,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\TCP.Parser\TCP.Parser.csproj" />
+    <ProjectReference Include="..\..\Drivers\TCP.Parser\TCP.Parser.csproj" />
     <ProjectReference Include="..\..\PluginInterface\PluginInterface.csproj" />
   </ItemGroup>
 
 </Project>
+  

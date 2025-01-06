@@ -2,10 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
-    <OutputPath>../../../IoTGateway/bin/Debug/net6.0/drivers</OutputPath>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- <GenerateAssemblyInfo>false</GenerateAssemblyInfo> -->
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="MQTTnet" Version="4.3.3.952" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="6.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="6.0.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
