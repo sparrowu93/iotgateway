@@ -12,7 +12,7 @@ using System.Runtime.CompilerServices;
 namespace MQTT.Driver
 {
     [DriverSupported("MQTTDevice")]
-    [DriverInfo("MQTTDriver", "V1.0.0", "Copyright IoTGateway 2024-01-06")]
+    [DriverInfo("MQTTDriver", "V1.0.0", "Copyright IoTGateway 2024-01-06, All Rights Reserved; 地址格式:topic.jsonPath")]
     public class MqttDriver : IDriver
     {
         private readonly IMqttClient _mqttClient;

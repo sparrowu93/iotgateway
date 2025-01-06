@@ -45,7 +45,9 @@ namespace TCP.DKScrew
                     return false;
                 }
 
-                _driver = new DKScrewDriver(_config.IpAddress, _config.Port);
+                _driver = new DKScrewDriver(DeviceId, _logger);
+                _driver.Host = _config.IpAddress;
+                _driver.Port = _config.Port;
                 await _driver.ConnectAsync();
                 
                 // 注册事件处理

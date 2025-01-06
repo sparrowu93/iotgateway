@@ -10,7 +10,7 @@ using System.Text.Json;
 namespace TCP.Parser
 {
     [DriverSupported("TCPParser")]
-    [DriverInfo("TCPParser", "V1.0.0", "Copyright IoTGateway 2024-12-26")]
+    [DriverInfo("TCPParser", "V1.0.0", "Copyright IoTGateway 2024-12-26, All rights reserved, 地址格式 起始位置,长度[,格式化参数] or json:element.jsonPath[,jsonpath")] ")]
     public class TCPParser : IDriver
     {
         private TcpClient? _tcpClient;

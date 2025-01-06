@@ -3,22 +3,232 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using TCP.DKScrew.Models;
 using TCP.DKScrew.Communication;
+using PluginInterface;
+using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace TCP.DKScrew
 {
-    public class DKScrewDriver : IDisposable
+    [DriverSupported("DKScrewDevice")]
+    [DriverInfo("DKScrewDriver", "V1.0.0", "Copyright IoTGateway 2024-01-06")]
+    public class DKScrewDriver : IDriver, IDisposable
     {
         private readonly TcpClientWrapper _client;
         private bool _isConnected;
         private readonly object _lock = new object();
+        private RunStatus? _lastStatus;
+        private TighteningResult? _lastTighteningResult;
+        private CurveData? _lastCurveData;
+        private int _currentPset;
+        public ILogger _logger { get; set; }
 
         public event EventHandler<RunStatus>? OnStatusChanged;
         public event EventHandler<TighteningResult>? OnTighteningComplete;
         public event EventHandler<CurveData>? OnCurveDataReceived;
 
-        public DKScrewDriver(string host, int port)
+        #region Configuration Parameters
+        [ConfigParameter("设备Id")]
+        public string DeviceId { get; set; }
+
+        [ConfigParameter("主机地址")]
+        public string Host { get; set; } = "127.0.0.1";
+
+        [ConfigParameter("端口")]
+        public int Port { get; set; } = 4196;
+
+        [ConfigParameter("超时时间ms")]
+        public int Timeout { get; set; } = 3000;
+
+        [ConfigParameter("最小通讯周期ms")]
+        public uint MinPeriod { get; set; } = 3000;
+        #endregion
+
+        public bool IsConnected => _isConnected;
+
+        public DKScrewDriver(string device, ILogger logger)
         {
-            _client = new TcpClientWrapper(host, port);
+            DeviceId = device;
+            _logger = logger;
+            _client = new TcpClientWrapper(Host, Port);
+            _logger.LogInformation($"Device:[{device}],Create()");
+        }
+
+        public bool Connect()
+        {
+            try
+            {
+                ConnectAsync().GetAwaiter().GetResult();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to connect to DKScrew device");
+                return false;
+            }
+        }
+
+        public bool Close()
+        {
+            try
+            {
+                DisconnectAsync().GetAwaiter().GetResult();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to disconnect from DKScrew device");
+                return false;
+            }
+        }
+
+        public DriverReturnValueModel Read(DriverAddressIoArgModel ioArg)
+        {
+            if (!_isConnected)
+            {
+                return new DriverReturnValueModel 
+                { 
+                    StatusType = VaribaleStatusTypeEnum.Bad,
+                    Message = "Not connected to DKScrew device" 
+                };
+            }
+
+            try
+            {
+                var variableName = ioArg.Address;
+                object? value = null;
+
+                switch (variableName)
+                {
+                    // 系统状态变量
+                    case DeviceVariables.IsConnected:
+                        value = _isConnected;
+                        break;
+                    case DeviceVariables.IsReady:
+                        value = _lastStatus?.IsReady ?? false;
+                        break;
+                    case DeviceVariables.IsRunning:
+                        value = _lastStatus?.IsRunning ?? false;
+                        break;
+                    case DeviceVariables.IsOK:
+                        value = _lastStatus?.IsOK ?? false;
+                        break;
+                    case DeviceVariables.IsNG:
+                        value = _lastStatus?.IsNG ?? false;
+                        break;
+                    case DeviceVariables.HasSystemError:
+                        value = _lastStatus?.HasSystemError ?? false;
+                        break;
+                    case DeviceVariables.SystemErrorId:
+                        value = _lastStatus?.SystemErrorId ?? 0;
+                        break;
+                    case DeviceVariables.RunStatus:
+                        value = _lastStatus?.IsRunning ?? false;
+                        break;
+
+                    // 拧紧结果变量
+                    case DeviceVariables.FinalTorque:
+                        value = _lastTighteningResult?.FinalTorque ?? 0.0;
+                        break;
+                    case DeviceVariables.MonitoringAngle:
+                        value = _lastTighteningResult?.MonitoringAngle ?? 0.0;
+                        break;
+                    case DeviceVariables.FinalTime:
+                        value = _lastTighteningResult?.FinalTime ?? 0.0;
+                        break;
+                    case DeviceVariables.FinalAngle:
+                        value = _lastTighteningResult?.FinalAngle ?? 0.0;
+                        break;
+                    case DeviceVariables.ResultStatus:
+                        value = _lastTighteningResult?.ResultStatus ?? 0;
+                        break;
+                    case DeviceVariables.NGCode:
+                        value = _lastTighteningResult?.NGCode ?? 0;
+                        break;
+                    case DeviceVariables.LastTighteningResult:
+                        value = _lastTighteningResult != null ? JsonSerializer.Serialize(_lastTighteningResult) : null;
+                        break;
+
+                    // 曲线数据变量
+                    case DeviceVariables.CurrentTorque:
+                        value = _lastCurveData?.CurrentTorque ?? 0.0;
+                        break;
+                    case DeviceVariables.CurrentAngle:
+                        value = _lastCurveData?.CurrentAngle ?? 0.0;
+                        break;
+                    case DeviceVariables.IsCurveFinished:
+                        value = _lastCurveData?.IsCurveFinished ?? false;
+                        break;
+                    case DeviceVariables.IsCurveStart:
+                        value = _lastCurveData?.IsCurveStart ?? false;
+                        break;
+                    case DeviceVariables.LastCurveData:
+                        value = _lastCurveData != null ? JsonSerializer.Serialize(_lastCurveData) : null;
+                        break;
+
+                    // 控制参数变量
+                    case DeviceVariables.CurrentPset:
+                        value = _currentPset;
+                        break;
+
+                    default:
+                        return new DriverReturnValueModel
+                        {
+                            StatusType = VaribaleStatusTypeEnum.Bad,
+                            Message = $"Unknown variable: {variableName}"
+                        };
+                }
+
+                return new DriverReturnValueModel
+                {
+                    StatusType = VaribaleStatusTypeEnum.Good,
+                    Value = value
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, $"Error reading variable {ioArg.Address}");
+                return new DriverReturnValueModel
+                {
+                    StatusType = VaribaleStatusTypeEnum.Bad,
+                    Message = $"Error reading from device: {ex.Message}"
+                };
+            }
+        }
+
+        public async Task<RpcResponse> WriteAsync(string RequestId, string Method, DriverAddressIoArgModel ioArg)
+        {
+            if (!_isConnected)
+            {
+                return new RpcResponse { IsSuccess = false, Description = "Not connected to DKScrew device" };
+            }
+
+            try
+            {
+                switch (Method.ToLower())
+                {
+                    case "start":
+                        await StartMotorAsync();
+                        break;
+                    case "stop":
+                        await StopMotorAsync();
+                        break;
+                    case "loosen":
+                        await LoosenAsync();
+                        break;
+                    default:
+                        return new RpcResponse { IsSuccess = false, Description = $"Unknown method: {Method}" };
+                }
+
+                return new RpcResponse { IsSuccess = true };
+            }
+            catch (Exception ex)
+            {
+                return new RpcResponse
+                {
+                    IsSuccess = false,
+                    Description = $"Failed to execute command: {ex.Message}"
+                };
+            }
         }
 
         public async Task ConnectAsync()
