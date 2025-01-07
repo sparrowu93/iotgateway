@@ -190,6 +190,79 @@ namespace TCP.Parser
             _logger.LogDebug($"Received data: {BitConverter.ToString(data)}");
         }
 
+        /// <summary>
+        /// 读取TCP数据中的字段值，支持字节解析和JSON解析两种模式
+        /// </summary>
+        /// <remarks>
+        /// 1. 字节解析模式 (格式：起始位置,长度[,格式化参数])
+        ///    示例：
+        ///    - "0,2" - 从位置0开始读取2个字节
+        ///    - "4,4,f2" - 从位置4开始读取4个字节，格式化为2位小数的浮点数
+        ///    
+        /// 2. JSON解析模式 (格式：json:jsonPath)
+        ///    2.1 基础类型示例：
+        ///    - 数据：{"temperature": 25.5, "humidity": 60}
+        ///    - 地址：json:temperature -> 返回 25.5
+        ///    - 地址：json:humidity -> 返回 60
+        ///    
+        ///    2.2 嵌套对象示例：
+        ///    - 数据：{
+        ///        "device": {
+        ///          "sensor": {
+        ///            "temp": 25.5,
+        ///            "unit": "C"
+        ///          }
+        ///        }
+        ///      }
+        ///    - 地址：json:device.sensor.temp -> 返回 25.5
+        ///    - 地址：json:device.sensor.unit -> 返回 "C"
+        ///    
+        ///    2.3 数组访问示例：
+        ///    - 数据：{
+        ///        "sensors": [
+        ///          {"id": "temp1", "value": 25},
+        ///          {"id": "temp2", "value": 28}
+        ///        ]
+        ///      }
+        ///    - 地址：json:sensors[0].value -> 返回 25
+        ///    - 地址：json:sensors[1].id -> 返回 "temp2"
+        ///    
+        ///    2.4 复杂数据结构示例：
+        ///    - 数据：{
+        ///        "timestamp": "2024-01-06T10:00:00Z",
+        ///        "device": {
+        ///          "location": "workshop",
+        ///          "measurements": [
+        ///            {
+        ///              "sensor": "temp",
+        ///              "values": [
+        ///                {"time": "10:00", "value": 25},
+        ///                {"time": "10:01", "value": 26}
+        ///              ]
+        ///            }
+        ///          ]
+        ///        }
+        ///      }
+        ///    - 地址：json:device.location -> 返回 "workshop"
+        ///    - 地址：json:device.measurements[0].values[1].value -> 返回 26
+        ///    
+        ///    2.5 混合类型数据示例：
+        ///    - 数据：{
+        ///        "status": {
+        ///          "online": true,
+        ///          "errors": ["E001", "E002"],
+        ///          "metrics": {
+        ///            "cpu": 75.5,
+        ///            "memory": {"total": 16384, "used": 8192}
+        ///          }
+        ///        }
+        ///      }
+        ///    - 地址：json:status.online -> 返回 true
+        ///    - 地址：json:status.errors[0] -> 返回 "E001"
+        ///    - 地址：json:status.metrics.memory.used -> 返回 8192
+        /// </remarks>
+        /// <param name="ioarg">包含地址信息的参数模型</param>
+        /// <returns>包含解析结果的驱动返回值模型</returns>
         [Method("读取字段值", description: "读取指定字段的值")]
         public DriverReturnValueModel Read(DriverAddressIoArgModel ioarg)
         {

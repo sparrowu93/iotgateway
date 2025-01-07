@@ -81,6 +81,62 @@ namespace TCP.DKScrew
             }
         }
 
+        /// <summary>
+        /// 读取电批设备的变量值
+        /// </summary>
+        /// <remarks>
+        /// 支持以下变量类型：
+        /// 
+        /// 1. 系统状态变量：
+        ///    - IsConnected: 设备连接状态
+        ///    - IsReady: 设备就绪状态
+        ///    - IsRunning: 设备运行状态
+        ///    - IsOK: 上一次拧紧结果是否合格
+        ///    - IsNG: 上一次拧紧结果是否不合格
+        ///    - HasSystemError: 是否存在系统错误
+        ///    - SystemErrorId: 系统错误代码
+        ///    - RunStatus: 当前运行状态
+        ///    
+        /// 2. 拧紧结果变量：
+        ///    - FinalTorque: 最终扭矩值 (N·m)
+        ///    - MonitoringAngle: 监控角度 (度)
+        ///    - FinalTime: 拧紧时间 (秒)
+        ///    - FinalAngle: 最终角度 (度)
+        ///    - ResultStatus: 拧紧结果状态
+        ///    - NGCode: 不合格代码
+        ///    - LastTighteningResult: 完整的拧紧结果JSON数据
+        ///    示例：
+        ///    {
+        ///      "finalTorque": 12.5,
+        ///      "monitoringAngle": 180.0,
+        ///      "finalTime": 2.5,
+        ///      "finalAngle": 185.2,
+        ///      "resultStatus": 1,
+        ///      "ngCode": 0
+        ///    }
+        ///    
+        /// 3. 曲线数据变量：
+        ///    - CurrentTorque: 当前扭矩值 (N·m)
+        ///    - CurrentAngle: 当前角度 (度)
+        ///    - IsCurveFinished: 曲线是否完成
+        ///    - IsCurveStart: 曲线是否开始
+        ///    - LastCurveData: 完整的曲线数据JSON
+        ///    示例：
+        ///    {
+        ///      "curvePoints": [
+        ///        {"time": 0.0, "torque": 0.0, "angle": 0.0},
+        ///        {"time": 0.1, "torque": 2.5, "angle": 45.0},
+        ///        {"time": 0.2, "torque": 5.0, "angle": 90.0}
+        ///      ],
+        ///      "isCurveFinished": true,
+        ///      "isCurveStart": false
+        ///    }
+        ///    
+        /// 4. 控制参数变量：
+        ///    - CurrentPset: 当前程序号
+        /// </remarks>
+        /// <param name="ioArg">包含地址信息的参数模型，地址为变量名称</param>
+        /// <returns>包含解析结果的驱动返回值模型</returns>
         public DriverReturnValueModel Read(DriverAddressIoArgModel ioArg)
         {
             if (!_isConnected)

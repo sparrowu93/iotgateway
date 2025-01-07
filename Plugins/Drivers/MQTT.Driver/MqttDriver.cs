@@ -6,6 +6,7 @@ using MQTTnet;
 using MQTTnet.Client;
 using PluginInterface;
 using System.Runtime.CompilerServices;
+using Newtonsoft.Json.Linq;
 
 [assembly: InternalsVisibleTo("MQTT.Driver.Tests")]
 
@@ -166,6 +167,45 @@ namespace MQTT.Driver
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// 读取MQTT主题下的数据，支持JSON路径解析
+        /// </summary>
+        /// <remarks>
+        /// JSON路径解析示例：
+        /// 1. 基础类型示例：
+        ///    - 主题：device/temperature
+        ///    - JSON数据：{"value": 25.5, "unit": "C"}
+        ///    - 地址：device/temperature.value -> 返回 25.5
+        ///    - 地址：device/temperature.unit -> 返回 "C"
+        /// 
+        /// 2. 数组访问示例：
+        ///    - 主题：device/sensors
+        ///    - JSON数据：{"data": [{"id": 1, "value": 25}, {"id": 2, "value": 30}]}
+        ///    - 地址：device/sensors.data[0].value -> 返回 25
+        ///    - 地址：device/sensors.data[1].value -> 返回 30
+        /// 
+        /// 3. 嵌套对象示例：
+        ///    - 主题：device/status
+        ///    - JSON数据：{"system": {"power": {"voltage": 220, "current": 5}}}
+        ///    - 地址：device/status.system.power.voltage -> 返回 220
+        ///    - 地址：device/status.system.power.current -> 返回 5
+        /// 
+        /// 4. 复杂数据结构示例：
+        ///    - 主题：device/metrics
+        ///    - JSON数据：{
+        ///        "timestamp": "2023-01-01T12:00:00Z",
+        ///        "measurements": {
+        ///          "temperature": [
+        ///            {"location": "room1", "value": 22},
+        ///            {"location": "room2", "value": 24}
+        ///          ]
+        ///        }
+        ///      }
+        ///    - 地址：device/metrics.measurements.temperature[0].value -> 返回 22
+        ///    - 地址：device/metrics.measurements.temperature[1].location -> 返回 "room2"
+        /// </remarks>
+        /// <param name="ioArg">包含地址信息的参数模型</param>
+        /// <returns>返回解析后的数据模型</returns>
         public DriverReturnValueModel Read(DriverAddressIoArgModel ioArg)
         {
             if (!_isConnected)
@@ -178,14 +218,6 @@ namespace MQTT.Driver
             }
 
             var topicPath = ioArg.Address.Split('.');
-            if (topicPath.Length < 2)
-            {
-                return new DriverReturnValueModel
-                {
-                    StatusType = VaribaleStatusTypeEnum.Bad,
-                    Message = "Invalid address format. Expected format: topic.jsonPath"
-                };
-            }
 
             var topic = topicPath[0];
             var jsonPath = string.Join(".", topicPath.Skip(1));
@@ -194,15 +226,23 @@ namespace MQTT.Driver
             {
                 try 
                 {
-                    if (subscription.LastValue is JsonElement jsonElement)
+                    if (subscription.LastValue is JObject jsonElement)
                     {
-                        JsonElement value;
-                        if (jsonElement.TryGetProperty(jsonPath, out value))
+                        if (string.IsNullOrEmpty(jsonPath))
                         {
                             return new DriverReturnValueModel
                             {
                                 StatusType = VaribaleStatusTypeEnum.Good,
-                                Value = GetJsonElementValue(value)
+                                Value = GetJObjectValue(jsonElement)
+                            };
+                        }
+                        JToken value;
+                        if (jsonElement.TryGetValue(jsonPath, out value))
+                        {
+                            return new DriverReturnValueModel
+                            {
+                                StatusType = VaribaleStatusTypeEnum.Good,
+                                Value = GetJTokenValue(value)
                             };
                         }
                     }
@@ -229,26 +269,18 @@ namespace MQTT.Driver
             };
         }
 
-        private object GetJsonElementValue(JsonElement element)
+        private object GetJObjectValue(JObject element)
         {
-            switch (element.ValueKind)
+            return element;
+        }
+
+        private object GetJTokenValue(JToken token)
+        {
+            if (token is JValue value)
             {
-                case JsonValueKind.String:
-                    return element.GetString();
-                case JsonValueKind.Number:
-                    if (element.TryGetInt32(out int intValue))
-                        return intValue;
-                    if (element.TryGetInt64(out long longValue))
-                        return longValue;
-                    return element.GetDouble();
-                case JsonValueKind.True:
-                case JsonValueKind.False:
-                    return element.GetBoolean();
-                case JsonValueKind.Null:
-                    return null;
-                default:
-                    return element.GetRawText();
+                return value.Value;
             }
+            return token;
         }
 
         public async Task<RpcResponse> WriteAsync(string RequestId, string Method, DriverAddressIoArgModel ioArg)
@@ -262,7 +294,7 @@ namespace MQTT.Driver
             {
                 var message = new MqttApplicationMessageBuilder()
                     .WithTopic(ioArg.Address)
-                    .WithPayload(JsonSerializer.Serialize(ioArg.Value))
+                    .WithPayload(JsonConvert.SerializeObject(ioArg.Value))
                     .Build();
 
                 await _mqttClient.PublishAsync(message);
@@ -293,6 +325,6 @@ namespace MQTT.Driver
     {
         public string Topic { get; set; } = string.Empty;
         public Func<string, object>? Parser { get; set; }
-        public object? LastValue { get; set; }
+        public JObject? LastValue { get; set; }
     }
 }
