@@ -142,6 +142,9 @@ namespace HTTP.JsonClient
                 }
 
                 // JSONPath 语法示例:
+                // $ - 根节点 - 获取整个JSON数据
+                // $.store - 获取store节点
+                // $.store.book - 获取store节点下的book节点
                 // $.store.book[0].title - 获取第一本书的标题
                 // $.store.book[*].author - 获取所有书的作者
                 // $.store.book[?(@.price < 10)].title - 获取价格小于10的书的标题
