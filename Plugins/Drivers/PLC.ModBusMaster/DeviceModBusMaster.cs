@@ -5,6 +5,7 @@ using PluginInterface;
 using System.IO.Ports;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
+using PLC.ModBusMaster.Models;
 
 namespace PLC.ModBusMaster
 {
@@ -17,7 +18,7 @@ namespace PLC.ModBusMaster
     [DriverSupported("Ascii Over TCP")]
     [DriverSupported("Ascii Over UDP")]
     [DriverInfo("ModBusMaster", "V1.0.0", "Copyright IoTGateway.net 20230220")]
-    public class DeviceModBusMaster : IDriver
+    public class DeviceModBusMaster : IDriver, IAddressDefinitionProvider
     {
         private TcpClient? _tcpClient;
         private UdpClient? _udpClient;
@@ -1057,6 +1058,13 @@ namespace PLC.ModBusMaster
             }
 
             return (slaveAddress, ioAddress);
+        }
+        #endregion
+
+        #region IAddressDefinitionProvider Implementation
+        public Dictionary<string, AddressDefinitionInfo> GetAddressDefinitions()
+        {
+            return ModBusAddressDefinitions.GetDefinitions();
         }
         #endregion
 
