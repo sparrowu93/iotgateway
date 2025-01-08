@@ -1,4 +1,4 @@
-﻿using Opc.Ua;
+using Opc.Ua;
 using Opc.Ua.Client;
 using System;
 using System.Collections.Generic;
@@ -213,7 +213,7 @@ namespace OpcUaHelper
         /// <summary>
         /// Handles a keep alive event from a session.
         /// </summary>
-        private void Session_KeepAlive( Session session, KeepAliveEventArgs e )
+        private void Session_KeepAlive( ISession session, KeepAliveEventArgs e )
         {
             try
             {

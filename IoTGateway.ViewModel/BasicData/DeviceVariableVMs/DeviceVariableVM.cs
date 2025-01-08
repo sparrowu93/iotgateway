@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -18,6 +18,7 @@ namespace IoTGateway.ViewModel.BasicData.DeviceVariableVMs
     {
         public List<ComboSelectListItem> AllDevices { get; set; }
         public List<ComboSelectListItem> AllMethods { get; set; }
+        public Dictionary<string, AddressDefinitionInfo> AddressDefinitions { get; set; }
 
         public DeviceVariableVM()
         {
@@ -39,11 +40,21 @@ namespace IoTGateway.ViewModel.BasicData.DeviceVariableVMs
             if (Entity.DeviceId != null)
             {
                 AllMethods = deviceService.GetDriverMethods(Entity.DeviceId);
+                var driver = deviceService.GetDriver(Entity.DeviceId);
+                if (driver is IAddressDefinitionProvider addressProvider)
+                {
+                    AddressDefinitions = addressProvider.GetAddressDefinitions();
+                }
             }
             else if (IoTBackgroundService.VariableSelectDeviceId != null)
             {
                 Entity.DeviceId = IoTBackgroundService.VariableSelectDeviceId;
                 AllMethods = deviceService.GetDriverMethods(Entity.DeviceId);
+                var driver = deviceService.GetDriver(Entity.DeviceId);
+                if (driver is IAddressDefinitionProvider addressProvider)
+                {
+                    AddressDefinitions = addressProvider.GetAddressDefinitions();
+                }
             }
 
             if (AllMethods?.Count() > 0)

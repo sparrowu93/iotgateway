@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using PluginInterface;
 using System.Reflection;
@@ -61,12 +61,42 @@ namespace Plugin
             return driverFilesComboSelect;
         }
 
-        public string GetAssembleNameByFileName(string fileName)
+        public (string AssembleName, string ErrorMessage) GetAssembleNameByFileName(string fileName)
         {
-            var file = _driverFiles.SingleOrDefault(f => Path.GetFileName(f) == fileName);
-            var dll = Assembly.LoadFrom(file);
-            var type = dll.GetTypes().FirstOrDefault(x => typeof(IDriver).IsAssignableFrom(x) && x.IsClass);
-            return type?.FullName;
+            try
+            {
+                if (string.IsNullOrEmpty(fileName))
+                {
+                    return (null, "驱动文件名不能为空");
+                }
+
+                var file = _driverFiles.SingleOrDefault(f => Path.GetFileName(f) == fileName);
+                if (file == null)
+                {
+                    return (null, $"驱动文件 {fileName} 不存在，请确保文件已复制到drivers/net6.0目录");
+                }
+
+                _logger.LogDebug("正在加载驱动程序集: {file}", file);
+                var dll = Assembly.LoadFrom(file);
+                var type = dll.GetTypes().FirstOrDefault(x => typeof(IDriver).IsAssignableFrom(x) && x.IsClass);
+                
+                if (type == null)
+                {
+                    return (null, $"驱动文件 {fileName} 中未找到实现IDriver接口的类");
+                }
+
+                _logger.LogDebug("找到驱动类型: {typeName}", type.FullName);
+                return (type.FullName, null);
+            }
+            catch (BadImageFormatException)
+            {
+                return (null, $"驱动文件 {fileName} 不是有效的.NET程序集，请确保编译目标平台正确");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "加载驱动程序集时出错: {fileName}", fileName);
+                return (null, $"加载驱动失败: {ex.Message}");
+            }
         }
 
         public void AddConfigs(Guid? dapId, Guid? driverId)
@@ -158,6 +188,49 @@ namespace Plugin
                     DriverInfos.Add(driverInfo);
                 }
             }
+        }
+
+        public Dictionary<string, AddressDefinitionInfo> GetDriverAddressDefinitions(string driverDll)
+        {
+            var driver = GetDriverInstance(driverDll);
+            if (driver is IAddressDefinitionProvider provider)
+            {
+                return provider.GetAddressDefinitions();
+            }
+            
+            // If driver doesn't implement IAddressDefinitionProvider, try to get definitions from attributes
+            var definitions = new Dictionary<string, AddressDefinitionInfo>();
+            var type = driver.GetType();
+            var properties = type.GetProperties();
+            
+            foreach (var property in properties)
+            {
+                var attr = property.GetCustomAttribute<AddressDefinitionAttribute>();
+                if (attr != null)
+                {
+                    definitions[property.Name] = new AddressDefinitionInfo
+                    {
+                        Description = attr.Description,
+                        DataType = attr.DataType,
+                        Unit = attr.Unit,
+                        AddressFormat = attr.AddressFormat
+                    };
+                }
+            }
+            
+            return definitions;
+        }
+
+        private IDriver GetDriverInstance(string driverDll)
+        {
+            var assembly = Assembly.LoadFrom(Path.Combine(_driverPath, driverDll));
+            var driverType = assembly.GetTypes()
+                .FirstOrDefault(t => typeof(IDriver).IsAssignableFrom(t) && t.IsClass);
+                
+            if (driverType == null)
+                throw new Exception($"No valid driver found in {driverDll}");
+                
+            return (IDriver)Activator.CreateInstance(driverType);
         }
     }
 }

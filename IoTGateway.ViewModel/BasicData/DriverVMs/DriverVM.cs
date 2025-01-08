@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -24,25 +24,30 @@ namespace IoTGateway.ViewModel.BasicData.DriverVMs
         public override void DoAdd()
         {
             var DriverService = Wtm.ServiceProvider.GetService(typeof(DriverService)) as DriverService;
-            Entity.AssembleName = DriverService.GetAssembleNameByFileName(Entity.FileName);
-            if (string.IsNullOrEmpty(Entity.AssembleName))
+            var (assembleName, errorMessage) = DriverService.GetAssembleNameByFileName(Entity.FileName);
+            
+            if (!string.IsNullOrEmpty(errorMessage))
             {
-                MSD.AddModelError("", "程序集获取失败");
+                MSD.AddModelError("", errorMessage);
                 return;
             }
 
+            Entity.AssembleName = assembleName;
             base.DoAdd();
         }
 
         public override void DoEdit(bool updateAllFields = false)
         {
             var DriverService = Wtm.ServiceProvider.GetService(typeof(DriverService)) as DriverService;
-            Entity.AssembleName = DriverService.GetAssembleNameByFileName(Entity.FileName);
-            if (string.IsNullOrEmpty(Entity.AssembleName))
+            var (assembleName, errorMessage) = DriverService.GetAssembleNameByFileName(Entity.FileName);
+            
+            if (!string.IsNullOrEmpty(errorMessage))
             {
-                MSD.AddModelError("", "程序集获取失败");
+                MSD.AddModelError("", errorMessage);
                 return;
             }
+
+            Entity.AssembleName = assembleName;
             base.DoEdit(updateAllFields);
         }
 

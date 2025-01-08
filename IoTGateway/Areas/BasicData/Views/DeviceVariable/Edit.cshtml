@@ -1,13 +1,13 @@
-﻿@model IoTGateway.ViewModel.BasicData.DeviceVariableVMs.DeviceVariableVM
+@model IoTGateway.ViewModel.BasicData.DeviceVariableVMs.DeviceVariableVM
 @inject IStringLocalizer<Program> Localizer;
 
-<wt:form vm="@Model">
+<wt:form vm="@Model" height="500">
     <wt:row items-per-row="ItemsPerRowEnum.Two">
-        <wt:combobox field="Entity.DeviceId" items="AllDevices" />
-        <wt:textbox field="Entity.Name" />
-        <wt:textbox field="Entity.Index" />
+        <wt:combobox field="Entity.DeviceId" items="AllDevices" trigger-url="/BasicData/Device/GetMethods" link-field="Entity.Method" required="true" />
+        <wt:textbox field="Entity.Name" required="true" />
+        <wt:textbox field="Entity.Index"/>
         <wt:textbox field="Entity.Description" />
-        <wt:combobox field="Entity.Method" items=AllMethods />
+        <wt:combobox field="Entity.Method" items="AllMethods" required="true" />
         <wt:textbox field="Entity.DeviceAddress" />
         <wt:combobox field="Entity.DataType" />
         <wt:switch field="Entity.IsTrigger" />
@@ -17,8 +17,17 @@
         <wt:combobox field="Entity.ProtectType" />
         <wt:textbox field="Entity.Alias" />
     </wt:row>
+    @if (Model.AddressDefinitions != null && Model.AddressDefinitions.Any())
+    {
+        <wt:quote>
+            <p>地址格式示例:</p>
+            @foreach (var def in Model.AddressDefinitions)
+            {
+                <p>@def.Value.Description: @def.Value.AddressFormat</p>
+            }
+        </wt:quote>
+    }
     <wt:quote>表达式可以进行简单的数学计算,其中raw为原值参与计算</wt:quote>
-    <wt:hidden field="Entity.ID" />
     <wt:row align="AlignEnum.Right">
         <wt:submitbutton />
         <wt:closebutton />

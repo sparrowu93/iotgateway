@@ -6,7 +6,9 @@ using MQTTnet;
 using MQTTnet.Client;
 using PluginInterface;
 using System.Runtime.CompilerServices;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using MQTT.Driver.Models;
 
 [assembly: InternalsVisibleTo("MQTT.Driver.Tests")]
 
@@ -14,7 +16,7 @@ namespace MQTT.Driver
 {
     [DriverSupported("MQTTDevice")]
     [DriverInfo("MQTTDriver", "V1.0.0", "Copyright IoTGateway 2024-01-06, All Rights Reserved; 地址格式:topic.jsonPath")]
-    public class MqttDriver : IDriver
+    public class MqttDriver : IDriver, IAddressDefinitionProvider
     {
         private readonly IMqttClient _mqttClient;
         private MqttClientOptions _options;
@@ -89,7 +91,7 @@ namespace MQTT.Driver
                     // Resubscribe to all topics
                     foreach (var subscription in _subscriptions.Values)
                     {
-                        SubscribeToTopic(subscription.Topic, subscription.Parser);
+                        SubscribeToTopic(subscription.Topic);
                     }
                 }
 
@@ -117,34 +119,24 @@ namespace MQTT.Driver
             }
         }
 
-        public void AddSubscription(string topic, Func<string, object> parser)
+        private void AddSubscription(string topic)
         {
-            _subscriptions[topic] = new MqttSubscription
+            if (!_subscriptions.ContainsKey(topic))
             {
-                Topic = topic,
-                Parser = parser,
-                LastValue = null
-            };
-
-            if (_isConnected)
-            {
-                SubscribeToTopic(topic, parser);
+                _subscriptions[topic] = new MqttSubscription { Topic = topic };
             }
         }
 
-        private async void SubscribeToTopic(string topic, Func<string, object> parser)
+        private async Task SubscribeToTopic(string topic)
         {
-            try
+            if (_mqttClient?.IsConnected == true)
             {
-                var mqttSubscribeOptions = new MqttFactory().CreateSubscribeOptionsBuilder()
-                    .WithTopicFilter(f => f.WithTopic(topic))
+                var mqttSubscribeOptions = new MqttClientSubscribeOptionsBuilder()
+                    .WithTopicFilter(topic)
                     .Build();
 
                 await _mqttClient.SubscribeAsync(mqttSubscribeOptions);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, $"Failed to subscribe to topic: {topic}");
+                AddSubscription(topic);
             }
         }
 
@@ -156,7 +148,7 @@ namespace MQTT.Driver
                 if (_subscriptions.TryGetValue(topic, out var subscription))
                 {
                     var payload = System.Text.Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
-                    subscription.LastValue = subscription.Parser(payload);
+                    subscription.LastValue = JObject.Parse(payload);
                 }
             }
             catch (Exception ex)
@@ -167,125 +159,61 @@ namespace MQTT.Driver
             return Task.CompletedTask;
         }
 
-        /// <summary>
-        /// 读取MQTT主题下的数据，支持JSON路径解析
-        /// </summary>
-        /// <remarks>
-        /// JSON路径解析示例：
-        /// 1. 基础类型示例：
-        ///    - 主题：device/temperature
-        ///    - JSON数据：{"value": 25.5, "unit": "C"}
-        ///    - 地址：device/temperature.value -> 返回 25.5
-        ///    - 地址：device/temperature.unit -> 返回 "C"
-        /// 
-        /// 2. 数组访问示例：
-        ///    - 主题：device/sensors
-        ///    - JSON数据：{"data": [{"id": 1, "value": 25}, {"id": 2, "value": 30}]}
-        ///    - 地址：device/sensors.data[0].value -> 返回 25
-        ///    - 地址：device/sensors.data[1].value -> 返回 30
-        /// 
-        /// 3. 嵌套对象示例：
-        ///    - 主题：device/status
-        ///    - JSON数据：{"system": {"power": {"voltage": 220, "current": 5}}}
-        ///    - 地址：device/status.system.power.voltage -> 返回 220
-        ///    - 地址：device/status.system.power.current -> 返回 5
-        /// 
-        /// 4. 复杂数据结构示例：
-        ///    - 主题：device/metrics
-        ///    - JSON数据：{
-        ///        "timestamp": "2023-01-01T12:00:00Z",
-        ///        "measurements": {
-        ///          "temperature": [
-        ///            {"location": "room1", "value": 22},
-        ///            {"location": "room2", "value": 24}
-        ///          ]
-        ///        }
-        ///      }
-        ///    - 地址：device/metrics.measurements.temperature[0].value -> 返回 22
-        ///    - 地址：device/metrics.measurements.temperature[1].location -> 返回 "room2"
-        /// </remarks>
-        /// <param name="ioArg">包含地址信息的参数模型</param>
-        /// <returns>返回解析后的数据模型</returns>
+        [Method("读取", description: "读取MQTT主题的值")]
         public DriverReturnValueModel Read(DriverAddressIoArgModel ioArg)
         {
-            if (!_isConnected)
+            var returnValue = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Bad };
+
+            try
             {
-                return new DriverReturnValueModel 
-                { 
-                    StatusType = VaribaleStatusTypeEnum.Bad,
-                    Message = "Not connected to MQTT broker" 
-                };
-            }
-
-            var topicPath = ioArg.Address.Split('.');
-
-            var topic = topicPath[0];
-            var jsonPath = string.Join(".", topicPath.Skip(1));
-
-            if (_subscriptions.TryGetValue(topic, out var subscription))
-            {
-                try 
+                // Split address into topic and JSON path
+                var addressParts = ioArg.Address.Split(new[] { '.' }, 2);
+                if (addressParts.Length != 2)
                 {
-                    if (subscription.LastValue is JObject jsonElement)
-                    {
-                        if (string.IsNullOrEmpty(jsonPath))
-                        {
-                            return new DriverReturnValueModel
-                            {
-                                StatusType = VaribaleStatusTypeEnum.Good,
-                                Value = GetJObjectValue(jsonElement)
-                            };
-                        }
-                        JToken value;
-                        if (jsonElement.TryGetValue(jsonPath, out value))
-                        {
-                            return new DriverReturnValueModel
-                            {
-                                StatusType = VaribaleStatusTypeEnum.Good,
-                                Value = GetJTokenValue(value)
-                            };
-                        }
-                    }
-                    return new DriverReturnValueModel
-                    {
-                        StatusType = VaribaleStatusTypeEnum.Bad,
-                        Message = $"JSON path '{jsonPath}' not found in topic: {topic}"
-                    };
+                    returnValue.Message = "Invalid address format. Expected: topic.jsonPath";
+                    return returnValue;
                 }
-                catch (Exception ex)
+
+                var topic = addressParts[0];
+                var jsonPath = "$." + addressParts[1];
+
+                // Ensure we're subscribed to the topic
+                if (!_subscriptions.ContainsKey(topic))
                 {
-                    return new DriverReturnValueModel
-                    {
-                        StatusType = VaribaleStatusTypeEnum.Bad,
-                        Message = $"Error parsing JSON data: {ex.Message}"
-                    };
+                    returnValue.Message = "Not subscribed to topic: " + topic;
+                    return returnValue;
                 }
+
+                var subscription = _subscriptions[topic];
+                if (subscription.LastValue == null)
+                {
+                    returnValue.Message = "No data received for topic: " + topic;
+                    return returnValue;
+                }
+
+                // Extract value using JSON path
+                var token = subscription.LastValue.SelectToken(jsonPath);
+                if (token == null)
+                {
+                    returnValue.Message = "JSON path not found: " + jsonPath;
+                    return returnValue;
+                }
+
+                returnValue.Value = token.ToObject<object>();
+                returnValue.StatusType = VaribaleStatusTypeEnum.Good;
+                return returnValue;
             }
-
-            return new DriverReturnValueModel
+            catch (Exception ex)
             {
-                StatusType = VaribaleStatusTypeEnum.Bad,
-                Message = $"No subscription found for topic: {topic}"
-            };
-        }
-
-        private object GetJObjectValue(JObject element)
-        {
-            return element;
-        }
-
-        private object GetJTokenValue(JToken token)
-        {
-            if (token is JValue value)
-            {
-                return value.Value;
+                returnValue.Message = ex.Message;
+                return returnValue;
             }
-            return token;
         }
 
+        [Method("写入", description: "向MQTT主题写入值")]
         public async Task<RpcResponse> WriteAsync(string RequestId, string Method, DriverAddressIoArgModel ioArg)
         {
-            if (!_isConnected)
+            if (!IsConnected)
             {
                 return new RpcResponse { IsSuccess = false, Description = "Not connected to MQTT broker" };
             }
@@ -319,12 +247,18 @@ namespace MQTT.Driver
             }
             _mqttClient?.Dispose();
         }
+
+        #region 变量地址格式定义区块
+        public Dictionary<string, AddressDefinitionInfo> GetAddressDefinitions()
+        {
+            return MqttAddressDefinitions.GetDefinitions();
+        }
+        #endregion
     }
 
     internal class MqttSubscription
     {
         public string Topic { get; set; } = string.Empty;
-        public Func<string, object>? Parser { get; set; }
         public JObject? LastValue { get; set; }
     }
 }

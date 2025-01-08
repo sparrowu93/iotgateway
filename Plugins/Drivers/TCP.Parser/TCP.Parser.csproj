@@ -2,10 +2,9 @@
 
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
+    <OutputPath>../../../IoTGateway/bin/Debug/net6.0/drivers</OutputPath>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <EnableDynamicLoading>true</EnableDynamicLoading>
-    <OutputType>Library</OutputType>
   </PropertyGroup>
 
   <ItemGroup>

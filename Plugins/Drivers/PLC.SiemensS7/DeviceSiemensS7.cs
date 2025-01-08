@@ -1,9 +1,11 @@
-﻿using S7.Net;
+using S7.Net;
 using System.Text;
 using S7.Net.Types;
 using PluginInterface;
 using Microsoft.Extensions.Logging;
 using System.IO;
+using System.Collections.Generic;
+using PLC.SiemensS7.Models;
 
 namespace PLC.SiemensS7
 {
@@ -14,7 +16,7 @@ namespace PLC.SiemensS7
     [DriverSupported("200")]
     [DriverSupported("200Smart")]
     [DriverInfo("SiemensS7", "V1.0.0", "Copyright IoTGateway.net 20230220")]
-    public class DeviceSiemensS7 : IDriver
+    public class DeviceSiemensS7 : IDriver, IAddressDefinitionProvider
     {
         private Plc _plc;
 
@@ -148,7 +150,7 @@ namespace PLC.SiemensS7
                         var head = _plc.ReadBytes(dataItem.DataType, dataItem.DB, dataItem.StartByteAdr, 2);
                         var strBytes = _plc.ReadBytes(dataItem.DataType, dataItem.DB, dataItem.StartByteAdr + 2, head[1]);
                         var strRaw = GetString(ioArg.ValueType, strBytes);
-                        
+
                         ret.Value = strRaw;
 
                     }
@@ -336,6 +338,13 @@ namespace PLC.SiemensS7
         }
 
 
+        #endregion
+
+        #region IAddressDefinitionProvider Implementation
+        public Dictionary<string, AddressDefinitionInfo> GetAddressDefinitions()
+        {
+            return SiemensAddressDefinitions.GetDefinitions();
+        }
         #endregion
 
         #region 私有方法

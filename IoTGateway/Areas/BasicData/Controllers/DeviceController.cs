@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System;
 using WalkingTec.Mvvm.Core;
@@ -340,6 +340,23 @@ namespace IoTGateway.Controllers
             {
                 vm.Import();
                 return FFResult().CloseDialog().RefreshGrid().Alert($"{vm.导入结果}");
+            }
+        }
+        #endregion
+
+        #region Variable Configuration
+        [HttpGet]
+        [ActionDescription("获取变量地址定义")]
+        public JsonResult GetAddressDefinitions(string driverDll)
+        {
+            try
+            {
+                var definitions = _DeviceService.DriverManager.GetDriverAddressDefinitions(driverDll);
+                return Json(new { Code = 200, Data = definitions });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { Code = 500, Message = ex.Message });
             }
         }
         #endregion

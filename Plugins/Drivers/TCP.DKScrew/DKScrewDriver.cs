@@ -11,7 +11,7 @@ namespace TCP.DKScrew
 {
     [DriverSupported("DKScrewDevice")]
     [DriverInfo("DKScrewDriver", "V1.0.0", "Copyright IoTGateway 2024-01-06")]
-    public class DKScrewDriver : IDriver, IDisposable
+    public class DKScrewDriver : IDriver, IDisposable, IAddressDefinitionProvider
     {
         private readonly TcpClientWrapper _client;
         private bool _isConnected;
@@ -424,5 +424,12 @@ namespace TCP.DKScrew
         {
             _client?.Dispose();
         }
+
+        #region IAddressDefinitionProvider Implementation
+        public Dictionary<string, AddressDefinitionInfo> GetAddressDefinitions()
+        {
+            return DKScrewAddressDefinitions.GetDefinitions();
+        }
+        #endregion
     }
 }

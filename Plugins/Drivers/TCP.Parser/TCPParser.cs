@@ -6,12 +6,19 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using PluginInterface;
 using System.Text.Json;
+using TCP.Parser.Models;
 
 namespace TCP.Parser
 {
+    public enum ProtocolTypeEnum
+    {
+        TCP,
+        UDP
+    }
+
     [DriverSupported("TCPParser")]
-    [DriverInfo("TCPParser", "V1.0.0", "Copyright IoTGateway 2024-12-26, All rights reserved, 地址格式 起始位置,长度[,格式化参数] or json:element.jsonPath[,jsonpath")] ")]
-    public class TCPParser : IDriver
+    [DriverInfo("TCPParser", "V1.0.0", "Copyright IoTGateway 2024-12-26, All rights reserved")]
+    public class TCPParser : IDriver, IAddressDefinitionProvider
     {
         private TcpClient? _tcpClient;
         private UdpClient? _udpClient;
@@ -33,7 +40,7 @@ namespace TCP.Parser
         public string DeviceId { get; set; }
 
         [ConfigParameter("协议类型")] 
-        public string ProtocolType { get; set; } = "TCP";
+        public ProtocolTypeEnum ProtocolType { get; set; } = ProtocolTypeEnum.TCP;
 
         [ConfigParameter("IP地址")] 
         public string IpAddress { get; set; } = "127.0.0.1";
@@ -60,7 +67,7 @@ namespace TCP.Parser
             _logger.LogInformation($"Device:[{_device}],Create()");
         }
 
-        public bool IsConnected => ProtocolType.ToUpper() == "TCP" ? 
+        public bool IsConnected => ProtocolType == ProtocolTypeEnum.TCP ? 
             (_tcpClient?.Connected ?? false) : 
             (_udpClient != null);
 
@@ -70,7 +77,7 @@ namespace TCP.Parser
             {
                 _logger.LogInformation($"Device:[{_device}],Connect()");
                 
-                if (ProtocolType.ToUpper() == "TCP")
+                if (ProtocolType == ProtocolTypeEnum.TCP)
                 {
                     _tcpClient = new TcpClient();
                     _tcpClient.ReceiveTimeout = Timeout;
@@ -103,7 +110,7 @@ namespace TCP.Parser
                 _logger.LogInformation($"Device:[{_device}],Close()");
                 StopReceiving();
                 
-                if (ProtocolType.ToUpper() == "TCP")
+                if (ProtocolType == ProtocolTypeEnum.TCP)
                 {
                     _stream?.Close();
                     _tcpClient?.Close();
@@ -127,7 +134,7 @@ namespace TCP.Parser
         public void Dispose()
         {
             Close();
-            if (ProtocolType.ToUpper() == "TCP")
+            if (ProtocolType == ProtocolTypeEnum.TCP)
             {
                 _tcpClient?.Dispose();
             }
@@ -155,7 +162,7 @@ namespace TCP.Parser
                 try
                 {
                     byte[] data;
-                    if (ProtocolType.ToUpper() == "TCP")
+                    if (ProtocolType == ProtocolTypeEnum.TCP)
                     {
                         if (_stream == null) break;
                         
@@ -489,6 +496,13 @@ namespace TCP.Parser
             return ret;
         }
 
+        #region IAddressDefinitionProvider Implementation
+        public Dictionary<string, AddressDefinitionInfo> GetAddressDefinitions()
+        {
+            return TCPParserAddressDefinitions.GetDefinitions();
+        }
+        #endregion
+
         private byte[] HandleEndian(byte[] data)
         {
             if (data == null || data.Length == 0)
@@ -671,7 +685,7 @@ namespace TCP.Parser
                 // Convert the ioarg to byte array based on its data type
                 byte[] data = ConvertToBytes(ioarg);
                 
-                if (ProtocolType.ToUpper() == "TCP")
+                if (ProtocolType == ProtocolTypeEnum.TCP)
                 {
                     if (_stream == null)
                         return new RpcResponse { IsSuccess = false, Description = "TCP stream not connected" };

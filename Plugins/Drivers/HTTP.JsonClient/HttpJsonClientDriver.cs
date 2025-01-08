@@ -5,12 +5,13 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using PluginInterface;
+using HTTP.JsonClient.Models;
 
 namespace HTTP.JsonClient
 {
     [DriverSupported("HTTP.JsonClient")]
     [DriverInfo("HTTP.JsonClient", "1.0.0", "HTTP JSON Client Driver")]
-    public class HttpJsonClientDriver : IDriver
+    public class HttpJsonClientDriver : IDriver, IAddressDefinitionProvider
     {
         private readonly HttpClient _httpClient;
         private bool _isConnected;
@@ -26,13 +27,13 @@ namespace HTTP.JsonClient
         [ConfigParameter("Path")]
         public string Path { get; set; }
 
-        [ConfigParameter("UpdateInterval", Optional = true)]
+        [ConfigParameter("UpdateInterval")]
         public int UpdateInterval { get; set; } = 1000; // Default 1 second
 
-        [ConfigParameter("Timeout", Optional = true)]
+        [ConfigParameter("Timeout")]
         public int Timeout { get; set; } = 3000; // Default 3 seconds
 
-        [ConfigParameter("Headers", Optional = true)]
+        [ConfigParameter("Headers")]
         public string Headers { get; set; }
 
         public bool IsConnected => _isConnected;
@@ -172,19 +173,19 @@ namespace HTTP.JsonClient
                     case DataTypeEnum.Int64:
                         value = token.Value<long>();
                         break;
-                    case DataTypeEnum.UInt16:
-                    case DataTypeEnum.UInt32:
-                    case DataTypeEnum.UInt64:
+                    case DataTypeEnum.Uint16:
+                    case DataTypeEnum.Uint32:
+                    case DataTypeEnum.Uint64:
                         value = token.Value<ulong>();
                         break;
                     case DataTypeEnum.Float:
                     case DataTypeEnum.Double:
                         value = token.Value<double>();
                         break;
-                    case DataTypeEnum.Boolean:
+                    case DataTypeEnum.Bool:
                         value = token.Value<bool>();
                         break;
-                    case DataTypeEnum.String:
+                    case DataTypeEnum.Utf8String:
                         value = token.Value<string>();
                         break;
                     default:
@@ -218,5 +219,12 @@ namespace HTTP.JsonClient
                 Description = "Write operation is not supported in HTTP JSON Client driver"
             });
         }
+
+        #region IAddressDefinitionProvider Implementation
+        public Dictionary<string, AddressDefinitionInfo> GetAddressDefinitions()
+        {
+            return HttpJsonAddressDefinitions.GetDefinitions();
+        }
+        #endregion
     }
 }

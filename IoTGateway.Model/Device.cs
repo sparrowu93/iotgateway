@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Runtime.CompilerServices;
@@ -7,6 +7,40 @@ using WalkingTec.Mvvm.Core;
 
 namespace IoTGateway.Model
 {
+    /// <summary>
+    /// 设备控制请求模型
+    /// </summary>
+    public class DeviceControlRequest
+    {
+        /// <summary>
+        /// 设备ID
+        /// </summary>
+        [Required]
+        public Guid DeviceId { get; set; }
+
+        /// <summary>
+        /// 变量名称
+        /// </summary>
+        [Required]
+        public string VariableName { get; set; }
+
+        /// <summary>
+        /// 控制值
+        /// </summary>
+        [Required]
+        public object Value { get; set; }
+
+        /// <summary>
+        /// 控制方法（可选，默认使用变量配置的方法）
+        /// </summary>
+        public string Method { get; set; }
+
+        /// <summary>
+        /// 请求ID（可选，用于跟踪请求）
+        /// </summary>
+        public string RequestId { get; set; }
+    }
+
     [Comment("设备维护")]
     [Index(nameof(DeviceName))]
     [Index(nameof(AutoStart))]
