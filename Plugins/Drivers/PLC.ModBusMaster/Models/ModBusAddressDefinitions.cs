@@ -149,7 +149,7 @@ namespace PLC.ModBusMaster.Models
                     new AddressDefinitionInfo
                     {
                         Description = "批量读取",
-                        DataType = DataTypeEnum.Object,
+                        DataType = DataTypeEnum.Utf8String,
                         AddressFormat = "[站号]|[功能码],[起始地址],[长度],[缓存名] - 例如: 1|3,0,10,cache1 表示从站号1读取10个保持寄存器到cache1，站号可选"
                     }
                 },
@@ -160,7 +160,7 @@ namespace PLC.ModBusMaster.Models
                     new AddressDefinitionInfo
                     {
                         Description = "从缓存读取",
-                        DataType = DataTypeEnum.Object,
+                        DataType = DataTypeEnum.Utf8String,
                         AddressFormat = "[缓存名],[偏移地址] - 例如: cache1,2 表示从cache1缓存的第2个位置读取数据"
                     }
                 }
