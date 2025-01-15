@@ -1,13 +1,14 @@
-﻿using Opc.Ua;
+using Opc.Ua;
 using OpcUaHelper;
 using PluginInterface;
 using Microsoft.Extensions.Logging;
+using OPC.UaClient.Models;
 
 namespace OPC.UaClient
 {
     [DriverSupported("OPCUaClient")]
     [DriverInfo("OPCUaClient", "V1.0.0", "Copyright IoTGateway.net 20230220")]
-    public class DeviceUaClient : IDriver
+    public class DeviceUaClient : IDriver, IAddressDefinitionProvider
     {
         private OpcUaClientHelper? _opcUaClient;
         public ILogger _logger { get; set; }
@@ -160,6 +161,11 @@ namespace OPC.UaClient
             RpcResponse rpcResponse = new() { IsSuccess = false, Description = "设备驱动内未实现写入功能" };
             await Task.CompletedTask;
             return rpcResponse;
+        }
+
+        public Dictionary<string, AddressDefinitionInfo> GetAddressDefinitions()
+        {
+            return UaClientAddressDefinitions.GetDefinitions();
         }
     }
 }

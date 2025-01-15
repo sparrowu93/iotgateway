@@ -1,12 +1,13 @@
-﻿using PluginInterface;
+using PluginInterface;
 using Automation.OPCClient;
 using Microsoft.Extensions.Logging;
+using OPC.DaClient.Models;
 
 namespace OPC.DaClient
 {
     [DriverSupported("OPCDaClient")]
     [DriverInfo("OPCDaClient", "V1.0.0", "Copyright IoTGateway.net 20230220")]
-    internal class DeviceDaClient : IDriver
+    internal class DeviceDaClient : IDriver, IAddressDefinitionProvider
     {
         private OPCClientWrapper? _opcDaClient;
 
@@ -207,5 +208,9 @@ namespace OPC.DaClient
 
         #endregion
 
+        public Dictionary<string, AddressDefinitionInfo> GetAddressDefinitions()
+        {
+            return DaClientAddressDefinitions.GetDefinitions();
+        }
     }
 }
