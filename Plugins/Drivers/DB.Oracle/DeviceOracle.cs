@@ -4,6 +4,9 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Oracle.ManagedDataAccess.Client;
 using PluginInterface;
+using System.Data;
+using System.Text.Json;
+using System.Linq;
 
 namespace DB.Oracle
 {
@@ -41,16 +44,24 @@ namespace DB.Oracle
         public uint MinPeriod { get; set; } = 1000;
 
         public bool IsConnected { get; private set; }
+        private readonly string _deviceName;
         public ILogger _logger { get; set; }
-
-        private OracleConnection _connection;
-        private Dictionary<string, string> _cachedQueries = new();
-        private Dictionary<string, DateTime> _lastQueryTimes = new();
 
         public DeviceOracle()
         {
             IsConnected = false;
         }
+
+        public DeviceOracle(string deviceName, ILogger logger)
+        {
+            _deviceName = deviceName;
+            _logger = logger;
+            IsConnected = false;
+        }
+
+        private OracleConnection _connection;
+        private Dictionary<string, string> _cachedQueries = new();
+        private Dictionary<string, DateTime> _lastQueryTimes = new();
 
         private string BuildConnectionString()
         {
@@ -106,19 +117,25 @@ namespace DB.Oracle
             Close();
         }
 
+        [Method("Read 读取", description: "读取对应地址的数据")]
         public DriverReturnValueModel Read(DriverAddressIoArgModel ioArg)
         {
             var returnValue = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good };
 
             try
             {
+                _logger?.LogInformation($"开始读取数据, 地址: {ioArg.Address}");
+                
                 if (!IsConnected)
                 {
+                    _logger?.LogInformation("连接已断开，尝试重新连接");
                     Connect();
                 }
 
                 // Parse address format: [TableName,]ColumnName[,WhereClause]
-                var addressParts = ioArg.Address.Split(',');
+                var addressParts = ioArg.Address.Split(new[] { ',' }, 3);
+                _logger?.LogInformation($"解析地址部分: {string.Join(" | ", addressParts)}");
+                
                 if (addressParts.Length < 1)
                 {
                     throw new ArgumentException("Address format should be: [TableName,]ColumnName[,WhereClause]");
@@ -127,67 +144,164 @@ namespace DB.Oracle
                 string tableName, columnName, whereClause;
                 if (addressParts.Length == 1)
                 {
-                    // Only column name provided, use defaults
                     if (string.IsNullOrEmpty(DefaultTableName))
                         throw new ArgumentException("Default table name not configured");
                     tableName = DefaultTableName;
                     columnName = addressParts[0].Trim();
                     whereClause = DefaultWhereClause ?? "";
+                    _logger?.LogInformation($"使用默认表名和条件: 表={tableName}, 列={columnName}, 条件={whereClause}");
                 }
                 else if (addressParts.Length == 2)
                 {
                     tableName = addressParts[0].Trim();
                     columnName = addressParts[1].Trim();
                     whereClause = DefaultWhereClause ?? "";
+                    _logger?.LogInformation($"使用默认条件: 表={tableName}, 列={columnName}, 条件={whereClause}");
                 }
                 else
                 {
                     tableName = addressParts[0].Trim();
                     columnName = addressParts[1].Trim();
                     whereClause = addressParts[2].Trim();
+                    _logger?.LogInformation($"使用完整配置: 表={tableName}, 列={columnName}, 条件={whereClause}");
                 }
 
-                // Check if we need to refresh the cache
-                var cacheKey = $"{tableName}_{columnName}_{whereClause}";
-                if (_lastQueryTimes.TryGetValue(cacheKey, out var lastQueryTime))
-                {
-                    var timeSinceLastQuery = DateTime.Now - lastQueryTime;
-                    if (timeSinceLastQuery.TotalMilliseconds < MinPeriod)
-                    {
-                        // Return cached value if within MinPeriod
-                        returnValue.Value = _cachedQueries[cacheKey];
-                        return returnValue;
-                    }
-                }
-
-                // Build and execute query
-                var query = $"SELECT {columnName} FROM {tableName}";
+                string query = $"SELECT \"{columnName}\" FROM \"{tableName}\"";
                 if (!string.IsNullOrEmpty(whereClause))
                 {
                     query += $" WHERE {whereClause}";
                 }
 
+                _logger?.LogInformation($"执行查询: {query}");
+
                 using var cmd = new OracleCommand(query, _connection);
-                cmd.CommandTimeout = Timeout / 1000; // Convert to seconds
+                cmd.CommandTimeout = Timeout / 1000;
 
                 var result = cmd.ExecuteScalar();
-                if (result != null)
+                if (result != null && result != DBNull.Value)
                 {
-                    // Cache the result
-                    _cachedQueries[cacheKey] = result.ToString();
-                    _lastQueryTimes[cacheKey] = DateTime.Now;
-                    
-                    returnValue.Value = result.ToString();
+                    var resultStr = result.ToString();
+                    _logger?.LogInformation($"查询结果: {resultStr}");
+                    returnValue.Value = resultStr;
                 }
                 else
                 {
+                    _logger?.LogWarning("未找到数据");
                     returnValue.StatusType = VaribaleStatusTypeEnum.Bad;
                     returnValue.Message = "No data found";
                 }
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Error reading from Oracle database");
+                _logger?.LogError($"读取数据库出错: {ex.Message}");
+                if (ex is OracleException oraEx)
+                {
+                    _logger?.LogError($"Oracle错误代码: {oraEx.Number}, 错误消息: {oraEx.Message}");
+                }
+                returnValue.StatusType = VaribaleStatusTypeEnum.Bad;
+                returnValue.Message = ex.Message;
+            }
+
+            return returnValue;
+        }
+
+        [Method("ReadList 读取列表", description: "读取查询结果并返回逗号分隔的列表")]
+        public DriverReturnValueModel ReadList(DriverAddressIoArgModel ioArg)
+        {
+            var returnValue = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good };
+
+            try
+            {
+                var query = ioArg.Address;
+                _logger?.LogInformation($"执行查询: {query}");
+
+                using var cmd = new OracleCommand(query, _connection);
+                cmd.CommandTimeout = Timeout / 1000;
+
+                using var reader = cmd.ExecuteReader();
+                var results = new List<string>();
+
+                while (reader.Read())
+                {
+                    if (reader[0] != null && reader[0] != DBNull.Value)
+                    {
+                        results.Add(reader[0].ToString());
+                    }
+                }
+
+                if (results.Any())
+                {
+                    returnValue.Value = string.Join(",", results);
+                    _logger?.LogInformation($"查询结果: {returnValue.Value}");
+                }
+                else
+                {
+                    _logger?.LogWarning("未找到数据");
+                    returnValue.StatusType = VaribaleStatusTypeEnum.Bad;
+                    returnValue.Message = "No data found";
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError($"读取数据库出错: {ex.Message}");
+                if (ex is OracleException oraEx)
+                {
+                    _logger?.LogError($"Oracle错误代码: {oraEx.Number}, 错误消息: {oraEx.Message}");
+                }
+                returnValue.StatusType = VaribaleStatusTypeEnum.Bad;
+                returnValue.Message = ex.Message;
+            }
+
+            return returnValue;
+        }
+
+        [Method("ReadJson 读取JSON", description: "读取查询结果并返回JSON格式")]
+        public DriverReturnValueModel ReadJson(DriverAddressIoArgModel ioArg)
+        {
+            var returnValue = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good };
+
+            try
+            {
+                var query = ioArg.Address;
+                _logger?.LogInformation($"执行查询: {query}");
+
+                using var cmd = new OracleCommand(query, _connection);
+                cmd.CommandTimeout = Timeout / 1000;
+
+                using var reader = cmd.ExecuteReader();
+                var dataTable = new DataTable();
+                dataTable.Load(reader);
+
+                var rows = new List<Dictionary<string, object>>();
+                foreach (DataRow row in dataTable.Rows)
+                {
+                    var dict = new Dictionary<string, object>();
+                    foreach (DataColumn col in dataTable.Columns)
+                    {
+                        dict[col.ColumnName] = row[col] == DBNull.Value ? null : row[col];
+                    }
+                    rows.Add(dict);
+                }
+
+                if (rows.Any())
+                {
+                    returnValue.Value = JsonSerializer.Serialize(rows);
+                    _logger?.LogInformation($"查询结果: {returnValue.Value}");
+                }
+                else
+                {
+                    _logger?.LogWarning("未找到数据");
+                    returnValue.StatusType = VaribaleStatusTypeEnum.Bad;
+                    returnValue.Message = "No data found";
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError($"读取数据库出错: {ex.Message}");
+                if (ex is OracleException oraEx)
+                {
+                    _logger?.LogError($"Oracle错误代码: {oraEx.Number}, 错误消息: {oraEx.Message}");
+                }
                 returnValue.StatusType = VaribaleStatusTypeEnum.Bad;
                 returnValue.Message = ex.Message;
             }
