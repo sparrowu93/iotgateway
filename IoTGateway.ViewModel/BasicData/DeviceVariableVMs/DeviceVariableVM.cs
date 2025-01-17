@@ -7,6 +7,7 @@ using IoTGateway.DataAccess.Migrations;
 using WalkingTec.Mvvm.Core;
 using WalkingTec.Mvvm.Core.Extensions;
 using IoTGateway.Model;
+using IoTGateway.Model.Utils;
 using Plugin;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Primitives;
@@ -63,12 +64,20 @@ namespace IoTGateway.ViewModel.BasicData.DeviceVariableVMs
 
         public override void DoAdd()
         {
+            if (Entity.DeviceAddress != null)
+            {
+                Entity.DeviceAddress = HtmlEntityHelper.DecodeHtmlEntities(Entity.DeviceAddress);
+            }
             base.DoAdd();
             UpdateVaribale();
         }
 
         public override void DoEdit(bool updateAllFields = false)
         {
+            if (Entity.DeviceAddress != null)
+            {
+                Entity.DeviceAddress = HtmlEntityHelper.DecodeHtmlEntities(Entity.DeviceAddress);
+            }
             base.DoEdit(updateAllFields);
             UpdateVaribale();
         }
@@ -83,6 +92,14 @@ namespace IoTGateway.ViewModel.BasicData.DeviceVariableVMs
             UpdateVaribale();
         }
 
+        public void SetEntityToVM()
+        {
+            // base.SetEntityToVM(); // Method does not exist in the base class
+            if (Entity.DeviceAddress != null)
+            {
+                Entity.DeviceAddress = HtmlEntityHelper.EncodeHtmlEntities(Entity.DeviceAddress);
+            }
+        }
 
         private void UpdateVaribale()
         {
