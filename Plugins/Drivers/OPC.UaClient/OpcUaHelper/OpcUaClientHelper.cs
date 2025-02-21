@@ -113,8 +113,10 @@ namespace OpcUaHelper
         /// connect to server
         /// </summary>
         /// <param name="serverUrl">remote url</param>
-        public async Task ConnectServer( string serverUrl )
+        /// <param name="useSecurity">whether to use security</param>
+        public async Task ConnectServer( string serverUrl, bool useSecurity = true )
         {
+            UseSecurity = useSecurity;
             m_session = await Connect( serverUrl );
         }
 
@@ -396,6 +398,15 @@ namespace OpcUaHelper
         /// </summary>
         public ApplicationConfiguration AppConfig => m_configuration;
 
+        /// <summary>
+        /// 设置客户端配置
+        /// </summary>
+        /// <param name="config">OPC UA 客户端配置</param>
+        public void SetClientConfiguration(ApplicationConfiguration config)
+        {
+            m_configuration = config;
+        }
+
         #endregion Public Members
 
         #region Node Write/Read Support
@@ -407,6 +418,11 @@ namespace OpcUaHelper
         /// <returns>DataValue</returns>
         public DataValue ReadNode( NodeId nodeId )
         {
+            if (nodeId == null)
+            {
+                return new DataValue(StatusCodes.BadNodeIdInvalid);
+            }
+
             ReadValueIdCollection nodesToRead = new ReadValueIdCollection
             {
                 new ReadValueId( )
@@ -416,19 +432,47 @@ namespace OpcUaHelper
                 }
             };
 
-            // read the current value
-            m_session.Read(
-                null,
-                0,
-                TimestampsToReturn.Neither,
-                nodesToRead,
-                out DataValueCollection results,
-                out DiagnosticInfoCollection diagnosticInfos );
+            try
+            {
+                // read the current value
+                m_session.Read(
+                    null,
+                    0,
+                    TimestampsToReturn.Neither,
+                    nodesToRead,
+                    out DataValueCollection results,
+                    out DiagnosticInfoCollection diagnosticInfos );
 
-            ClientBase.ValidateResponse( results, nodesToRead );
-            ClientBase.ValidateDiagnosticInfos( diagnosticInfos, nodesToRead );
+                ClientBase.ValidateResponse( results, nodesToRead );
+                ClientBase.ValidateDiagnosticInfos( diagnosticInfos, nodesToRead );
 
-            return results[0];
+                if (results == null || results.Count == 0)
+                {
+                    return new DataValue(StatusCodes.BadUnexpectedError);
+                }
+
+                var result = results[0];
+                if (result == null)
+                {
+                    return new DataValue(StatusCodes.BadUnexpectedError);
+                }
+
+                if (StatusCode.IsBad(result.StatusCode))
+                {
+                    return new DataValue(result.StatusCode);
+                }
+
+                if (result.Value == null)
+                {
+                    return new DataValue(StatusCodes.BadUnexpectedError);
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                return new DataValue(StatusCodes.BadUnexpectedError);
+            }
         }
 
         /// <summary>

@@ -1,0 +1,17 @@
+# Instructions
+
+During you interaction with the user, if you find anything reusable in this project (e.g. version of a library, model name), especially about a fix to a mistake you made or a correction you received, you should take note in the `Lessons` section in the `scratchpad.md` file so you will not make the same mistake again. 
+
+You should also use the `scratchpad.md` file as a scratchpad to organize your thoughts. Especially when you receive a new task, you should first review the content of the scratchpad, clear old different task if necessary, first explain the task, and plan the steps you need to take to complete the task. You can use todo markers to indicate the progress, e.g.
+[X] Task 1
+[ ] Task 2
+Also update the progress of the task in the Scratchpad when you finish a subtask.
+Especially when you finished a milestone, it will help to improve your depth of task accomplishment to use the scratchpad to reflect and plan.
+The goal is to help you maintain a big picture as well as the progress of the task. Always refer to the Scratchpad when you plan the next step.
+
+## User Specified Lessons
+1. 本项目是使用 .Net6.0 框架的物联网采集网关项目, 支持通过编译驱动，添加驱动，在添加设备阶段绑定驱动，通过修改设备连接参数连接采集目标，通过指定采集变量解析采集内容并分发上报的功能。
+2. IoTgateway 为项目核心模块，提供基础设备管理、通信管理、数据上报、规则管理等功能。
+3. IoTgateway/Areas/Views 为项目后台页面功能模块， 提供设备管理(Device),设备连接参数管理（DeviceConfig）,设备采集变量管理（DeviceVariable）。
+4. Plugins 为项目扩展模块, 提供驱动接口，用于添加新的驱动，驱动由插件提供。
+5. Plugins/Drivers 为驱动具体实现模块， 用于定义驱动的具体实现。
