@@ -213,6 +213,65 @@ namespace OPC.UaClient
             return ret;
         }
 
+        [Method("读取节点属性", description: "读取OPCUa节点的所有属性")]
+        public Dictionary<string, DriverReturnValueModel> ReadNodeAttributes(DriverAddressIoArgModel ioArg)
+        {
+            var result = new Dictionary<string, DriverReturnValueModel>();
+
+            if (!IsConnected)
+            {
+                var errorResult = new DriverReturnValueModel 
+                { 
+                    StatusType = VaribaleStatusTypeEnum.Bad,
+                    Message = "连接失败"
+                };
+                result.Add("Error", errorResult);
+                _logger.LogError($"Device:[{_device}],ReadNodeAttributes({ioArg.Address}) failed: not connected");
+                return result;
+            }
+
+            try
+            {
+                if (_opcUaClient == null)
+                {
+                    var errorResult = new DriverReturnValueModel 
+                    { 
+                        StatusType = VaribaleStatusTypeEnum.Bad,
+                        Message = "OPC UA 客户端未初始化"
+                    };
+                    result.Add("Error", errorResult);
+                    _logger.LogError($"Device:[{_device}],ReadNodeAttributes({ioArg.Address}) failed: client not initialized");
+                    return result;
+                }
+
+                _logger.LogInformation($"Device:[{_device}],ReadNodeAttributes({ioArg.Address}) attempting to read attributes");
+                
+                var attributes = _opcUaClient.ReadNodeAttributes(new NodeId(ioArg.Address));
+                foreach (var attr in attributes)
+                {
+                    result.Add(attr.Key, new DriverReturnValueModel 
+                    { 
+                        StatusType = VaribaleStatusTypeEnum.Good,
+                        Value = attr.Value
+                    });
+                }
+
+                _logger.LogInformation($"Device:[{_device}],ReadNodeAttributes({ioArg.Address}) succeeded, found {attributes.Count} attributes");
+            }
+            catch (Exception ex)
+            {
+                var errorResult = new DriverReturnValueModel 
+                { 
+                    StatusType = VaribaleStatusTypeEnum.Bad,
+                    Message = $"读取属性失败: {ex.Message}"
+                };
+                result.Add("Error", errorResult);
+                _logger.LogError(ex, $"Device:[{_device}],ReadNodeAttributes({ioArg.Address}) failed with exception");
+            }
+
+            return result;
+        }
+
         [Method("测试方法", description: "测试方法，返回当前时间")]
         public DriverReturnValueModel Read(DriverAddressIoArgModel ioArg)
         {

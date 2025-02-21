@@ -149,6 +149,46 @@ namespace OPC.UaClient.Tests
             Assert.NotNull(result.Message);
         }
 
+        [Fact]
+        public void ReadNodeAttributes_Counter1_ShouldReturnAttributes()
+        {
+            // Arrange
+            _client.Connect();
+
+            // Act
+            var result = _client.ReadNodeAttributes(new DriverAddressIoArgModel { Address = COUNTER_NODE });
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.True(result.Count > 0);
+            Assert.DoesNotContain("Error", result.Keys);
+            
+            // 验证必要的属性存在
+            Assert.Contains("NodeId", result.Keys);
+            Assert.Contains("DisplayName", result.Keys);
+            Assert.Contains("Value", result.Keys);
+            Assert.Contains("DataType", result.Keys);
+            
+            // 验证属性值
+            Assert.Equal(VaribaleStatusTypeEnum.Good, result["Value"].StatusType);
+            Assert.NotNull(result["Value"].Value);
+        }
+
+        [Fact]
+        public void ReadNodeAttributes_InvalidNode_ShouldReturnError()
+        {
+            // Arrange
+            _client.Connect();
+
+            // Act
+            var result = _client.ReadNodeAttributes(new DriverAddressIoArgModel { Address = INVALID_NODE });
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Contains("Error", result.Keys);
+            Assert.Equal(VaribaleStatusTypeEnum.Bad, result["Error"].StatusType);
+        }
+
         public void Dispose()
         {
             _client?.Dispose();
