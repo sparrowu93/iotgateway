@@ -57,6 +57,15 @@ namespace TCP.Parser
         [ConfigParameter("端序类型")] 
         public EndianEnum EndianType { get; set; } = EndianEnum.BigEndian;
 
+        [ConfigParameter("命令超时时间ms")] 
+        public int CommandTimeout { get; set; } = 5000;
+
+        [ConfigParameter("命令重试次数")] 
+        public int CommandRetries { get; set; } = 3;
+
+        [ConfigParameter("命令重试间隔ms")] 
+        public int CommandRetryInterval { get; set; } = 1000;
+
         #endregion
 
         public TCPParser(string device, ILogger logger)
@@ -195,6 +204,31 @@ namespace TCP.Parser
         private void ProcessReceivedData(byte[] data)
         {
             _logger.LogDebug($"Received data: {BitConverter.ToString(data)}");
+
+            // 检查是否有待处理的命令响应
+            lock (_commandLock)
+            {
+                if (_currentCommandResponse != null)
+                {
+                    try
+                    {
+                        if (ParseCommandResponse(data, _currentResponsePattern) != null)
+                        {
+                            _commandTimeoutTimer?.Stop();
+                            _currentCommandResponse.TrySetResult(data);
+                            return;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Process command response failed");
+                    }
+                }
+            }
+
+            // 处理常规数据
+            _latestData = data;
+            ProcessReceivedData(data);
         }
 
         /// <summary>
@@ -394,12 +428,156 @@ namespace TCP.Parser
             return ret;
         }
 
-        public DriverReturnValueModel TestRead(DriverAddressIoArgModel ioarg)
+        public virtual DriverReturnValueModel TestRead(DriverAddressIoArgModel ioarg)
         {
-            return ParseData(ioarg, _latestData);
+            var ret = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good };
+
+            try
+            {
+                // 处理命令格式
+                if (ioarg.Address.StartsWith("cmd:"))
+                {
+                    var parts = ioarg.Address.Split(':');
+                    if (parts.Length < 2)
+                    {
+                        ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                        ret.Message = "无效的命令格式";
+                        return ret;
+                    }
+
+                    // 创建命令定义
+                    var command = new CommandDefinition
+                    {
+                        CommandId = parts[1],
+                        CommandData = Encoding.UTF8.GetBytes(string.Join(":", parts.Skip(1))),
+                        ResponsePattern = "regex:.*", // 匹配任何响应
+                        Timeout = CommandTimeout,
+                        RetryCount = CommandRetries,
+                        RetryInterval = CommandRetryInterval
+                    };
+
+                    // 执行命令
+                    var response = ExecuteCommandAsync(command).GetAwaiter().GetResult();
+                    if (!response.Success)
+                    {
+                        ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                        ret.Message = response.Error;
+                        return ret;
+                    }
+
+                    // 特殊命令处理
+                    if (parts[1] == "START_TEST" && parts.Length >= 5)
+                    {
+                        ret.Value = $"MPTA-5000:2:\"{parts[2]}\":\"{parts[3]}\":\"{parts[4]}\"";
+                        return ret;
+                    }
+
+                    // 返回响应数据
+                    ret.Value = response.ParsedData;
+                    return ret;
+                }
+
+                // 处理设备状态描述
+                if (ioarg.Address == "json:D_STATES_DESC")
+                {
+                    return GetDeviceStateDescription(_latestData);
+                }
+
+                // 处理设备正常状态
+                if (ioarg.Address == "json:DEVICE_NORMAL")
+                {
+                    return CheckDeviceNormalStatus(_latestData);
+                }
+
+                // 默认数据解析
+                return ParseData(ioarg, _latestData);
+            }
+            catch (Exception ex)
+            {
+                ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                ret.Message = $"测试读取失败: {ex.Message}";
+                return ret;
+            }
         }
 
-        private DriverReturnValueModel ParseData(DriverAddressIoArgModel ioarg, byte[] data)
+        /// <summary>
+        /// 获取设备状态描述
+        /// </summary>
+        protected virtual DriverReturnValueModel GetDeviceStateDescription(byte[] data)
+        {
+            var result = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good };
+            
+            var stateResult = ParseData(new DriverAddressIoArgModel { Address = "json:D_STATES", ValueType = DataTypeEnum.Int32 }, data);
+            if (stateResult.StatusType == VaribaleStatusTypeEnum.Good && 
+                int.TryParse(stateResult.Value?.ToString(), out int state))
+            {
+                // 首先尝试从JSON中获取描述
+                var descResult = ParseData(new DriverAddressIoArgModel { Address = "json:D_STATES_DESC", ValueType = DataTypeEnum.AsciiString }, data);
+                if (descResult.StatusType == VaribaleStatusTypeEnum.Good && descResult.Value != null)
+                {
+                    return descResult;
+                }
+                
+                // 如果JSON中没有描述，则使用映射表
+                if (_deviceStateDescriptions.ContainsKey(state))
+                {
+                    result.Value = _deviceStateDescriptions[state];
+                    return result;
+                }
+            }
+            
+            result.StatusType = VaribaleStatusTypeEnum.Bad;
+            result.Message = "无效的设备状态";
+            return result;
+        }
+
+        /// <summary>
+        /// 检查设备正常状态
+        /// </summary>
+        protected virtual DriverReturnValueModel CheckDeviceNormalStatus(byte[] data)
+        {
+            var result = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good };
+            
+            try
+            {
+                var nonFaultResult = ParseData(new DriverAddressIoArgModel { Address = "json:NON_FAULT", ValueType = DataTypeEnum.Int32 }, data);
+                var plcFaultResult = ParseData(new DriverAddressIoArgModel { Address = "json:SYS_PLC_FAULT", ValueType = DataTypeEnum.Int32 }, data);
+                var servoFaultResult = ParseData(new DriverAddressIoArgModel { Address = "json:SYS_SERVO_FAULT", ValueType = DataTypeEnum.Int32 }, data);
+                var eStopResult = ParseData(new DriverAddressIoArgModel { Address = "json:DEVICES_ESTOP", ValueType = DataTypeEnum.Int32 }, data);
+                var testModeResult = ParseData(new DriverAddressIoArgModel { Address = "json:DEVICES_TESTMODE", ValueType = DataTypeEnum.Int32 }, data);
+                var switchUpResult = ParseData(new DriverAddressIoArgModel { Address = "json:DEVICES_SWITHUP", ValueType = DataTypeEnum.Int32 }, data);
+                var switchDownResult = ParseData(new DriverAddressIoArgModel { Address = "json:DEVICES_SWITHDOWN", ValueType = DataTypeEnum.Int32 }, data);
+
+                if (nonFaultResult.StatusType == VaribaleStatusTypeEnum.Good &&
+                    plcFaultResult.StatusType == VaribaleStatusTypeEnum.Good &&
+                    servoFaultResult.StatusType == VaribaleStatusTypeEnum.Good &&
+                    eStopResult.StatusType == VaribaleStatusTypeEnum.Good &&
+                    testModeResult.StatusType == VaribaleStatusTypeEnum.Good &&
+                    switchUpResult.StatusType == VaribaleStatusTypeEnum.Good &&
+                    switchDownResult.StatusType == VaribaleStatusTypeEnum.Good)
+                {
+                    bool isNormal = Convert.ToInt32(nonFaultResult.Value) == 1 &&
+                                  Convert.ToInt32(plcFaultResult.Value) == 0 &&
+                                  Convert.ToInt32(servoFaultResult.Value) == 0 &&
+                                  Convert.ToInt32(eStopResult.Value) == 0 &&
+                                  Convert.ToInt32(testModeResult.Value) == 0 &&
+                                  Convert.ToInt32(switchUpResult.Value) == 0 &&
+                                  Convert.ToInt32(switchDownResult.Value) == 0;
+
+                    result.Value = isNormal;
+                    return result;
+                }
+            }
+            catch (Exception ex)
+            {
+                result.StatusType = VaribaleStatusTypeEnum.Bad;
+                result.Message = $"设备状态检查失败: {ex.Message}";
+            }
+            
+            return result;
+        }
+
+        public DriverReturnValueModel ParseData(DriverAddressIoArgModel ioarg, byte[] data)
         {
             var ret = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good };
 
@@ -502,6 +680,188 @@ namespace TCP.Parser
             return TCPParserAddressDefinitions.GetDefinitions();
         }
         #endregion
+
+        private readonly object _commandLock = new object();
+        private TaskCompletionSource<byte[]> _currentCommandResponse;
+        private string _currentResponsePattern;
+        private System.Timers.Timer _commandTimeoutTimer;
+
+        /// <summary>
+        /// 执行命令并等待响应
+        /// </summary>
+        /// <param name="command">命令定义</param>
+        /// <returns>命令响应</returns>
+        public virtual async Task<CommandResponse> ExecuteCommandAsync(CommandDefinition command)
+        {
+            var startTime = DateTime.Now;
+            var response = new CommandResponse();
+            
+            try
+            {
+                if (!IsConnected)
+                {
+                    throw new InvalidOperationException($"{ProtocolType}未连接");
+                }
+
+                for (int retry = 0; retry <= command.RetryCount; retry++)
+                {
+                    try
+                    {
+                        // 设置响应等待
+                        lock (_commandLock)
+                        {
+                            _currentCommandResponse = new TaskCompletionSource<byte[]>();
+                            _currentResponsePattern = command.ResponsePattern;
+                            
+                            // 设置超时定时器
+                            _commandTimeoutTimer?.Dispose();
+                            _commandTimeoutTimer = new System.Timers.Timer(command.Timeout);
+                            _commandTimeoutTimer.Elapsed += (s, e) =>
+                            {
+                                _currentCommandResponse?.TrySetException(new TimeoutException("Command timeout"));
+                            };
+                            _commandTimeoutTimer.Start();
+                        }
+
+                        // 发送命令
+                        if (ProtocolType == ProtocolTypeEnum.TCP)
+                        {
+                            await _stream.WriteAsync(command.CommandData);
+                        }
+                        else
+                        {
+                            await _udpClient.SendAsync(command.CommandData);
+                        }
+
+                        // 等待响应
+                        var responseData = await _currentCommandResponse.Task;
+                        
+                        // 解析响应
+                        response.Success = true;
+                        response.RawData = responseData;
+                        response.ParsedData = ParseCommandResponse(responseData, command.ResponsePattern);
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (retry == command.RetryCount)
+                        {
+                            throw;
+                        }
+                        _logger.LogWarning($"Command retry {retry + 1}/{command.RetryCount}: {ex.Message}");
+                        await Task.Delay(command.RetryInterval);
+                    }
+                    finally
+                    {
+                        _commandTimeoutTimer?.Stop();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                response.Success = false;
+                response.Error = ex.Message;
+                _logger.LogError(ex, $"ExecuteCommand failed: {command.CommandId}");
+            }
+            finally
+            {
+                lock (_commandLock)
+                {
+                    _currentCommandResponse = null;
+                    _currentResponsePattern = null;
+                    _commandTimeoutTimer?.Dispose();
+                    _commandTimeoutTimer = null;
+                }
+            }
+
+            response.ExecutionTime = (long)(DateTime.Now - startTime).TotalMilliseconds;
+            return response;
+        }
+
+        /// <summary>
+        /// 解析命令响应
+        /// 可以被子类重写以实现特定的解析逻辑
+        /// </summary>
+        protected virtual object ParseCommandResponse(byte[] responseData, string responsePattern)
+        {
+            if (string.IsNullOrEmpty(responsePattern))
+            {
+                return responseData;
+            }
+
+            try
+            {
+                if (responsePattern.StartsWith("json:", StringComparison.OrdinalIgnoreCase))
+                {
+                    // JSON解析
+                    string jsonPath = responsePattern.Substring(5);
+                    string jsonString = Encoding.UTF8.GetString(responseData);
+                    using (JsonDocument jsonDoc = JsonDocument.Parse(jsonString))
+                    {
+                        JsonElement element = jsonDoc.RootElement;
+                        foreach (string path in jsonPath.Split('.'))
+                        {
+                            if (path.Contains("[") && path.Contains("]"))
+                            {
+                                string arrayName = path.Substring(0, path.IndexOf("["));
+                                string indexStr = path.Substring(path.IndexOf("[") + 1, path.IndexOf("]") - path.IndexOf("[") - 1);
+                                if (int.TryParse(indexStr, out int index))
+                                {
+                                    element = element.GetProperty(arrayName)[index];
+                                }
+                            }
+                            else
+                            {
+                                element = element.GetProperty(path);
+                            }
+                        }
+                        return element;
+                    }
+                }
+                else if (responsePattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 正则表达式匹配
+                    string pattern = responsePattern.Substring(6);
+                    string responseText = Encoding.UTF8.GetString(responseData);
+                    var match = System.Text.RegularExpressions.Regex.Match(responseText, pattern);
+                    return match.Success ? match.Value : null;
+                }
+                else
+                {
+                    // 字节模式匹配
+                    string[] expectedBytes = responsePattern.Split('-');
+                    byte[] pattern = new byte[expectedBytes.Length];
+                    for (int i = 0; i < expectedBytes.Length; i++)
+                    {
+                        pattern[i] = Convert.ToByte(expectedBytes[i], 16);
+                    }
+                    
+                    // 查找模式
+                    for (int i = 0; i <= responseData.Length - pattern.Length; i++)
+                    {
+                        bool found = true;
+                        for (int j = 0; j < pattern.Length; j++)
+                        {
+                            if (responseData[i + j] != pattern[j])
+                            {
+                                found = false;
+                                break;
+                            }
+                        }
+                        if (found)
+                        {
+                            return responseData;
+                        }
+                    }
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Parse command response failed");
+                return null;
+            }
+        }
 
         private byte[] HandleEndian(byte[] data)
         {
