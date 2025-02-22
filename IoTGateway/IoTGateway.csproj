@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
 	<PropertyGroup>
 		<TargetFramework>net6.0</TargetFramework>
@@ -25,7 +25,7 @@
 		<PackageReference Include="MQTTnet.Extensions.Rpc" Version="4.3.6.1152" />
 		<PackageReference Include="NLog" Version="5.3.4" />
 		<PackageReference Include="NLog.Web.AspNetCore" Version="5.3.15" />
-		<PackageReference Include="System.IO.Ports" Version="9.0.0" />
+		<PackageReference Include="System.IO.Ports" Version="6.0.0" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -46,5 +46,3 @@
 	</ItemGroup>
 
 </Project>
-
-
