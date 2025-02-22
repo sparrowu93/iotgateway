@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <device id="1" name="测试设备">
+        <status code="0" message="正常">
+            <temperature>25.6</temperature>
+            <humidity>60</humidity>
+        </status>
+        <data>
+            <measurement time="2024-01-01T12:00:00">
+                <value type="pressure">1013.25</value>
+                <value type="wind">5.2</value>
+            </measurement>
+            <measurement time="2024-01-01T12:01:00">
+                <value type="pressure">1013.20</value>
+                <value type="wind">5.5</value>
+            </measurement>
+        </data>
+    </device>
+<!-- 缺少结束标签 -->
