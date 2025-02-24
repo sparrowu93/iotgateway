@@ -468,6 +468,7 @@ namespace WebSocket.Client
             }
         }
 
+        [Method("读取", description: "读取WebSocket主题的值")]
         public DriverReturnValueModel Read(DriverAddressIoArgModel ioArg)
         {
             var returnValue = new DriverReturnValueModel();

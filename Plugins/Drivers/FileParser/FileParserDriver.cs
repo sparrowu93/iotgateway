@@ -107,6 +107,7 @@ public class FileParserDriver : IDriver
         }
     }
 
+    [Method("读取", description: "文件解析器")]
     public DriverReturnValueModel Read(DriverAddressIoArgModel ioArg)
     {
         try

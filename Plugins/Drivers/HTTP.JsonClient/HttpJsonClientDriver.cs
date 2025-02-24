@@ -127,6 +127,7 @@ namespace HTTP.JsonClient
             }
         }
 
+        [Method("读取", description: "读取JSON路径的值")]
         public DriverReturnValueModel Read(DriverAddressIoArgModel ioArg)
         {
             try

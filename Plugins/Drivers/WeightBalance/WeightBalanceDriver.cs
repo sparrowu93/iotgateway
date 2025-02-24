@@ -121,6 +121,7 @@ namespace WeightBalance
             }
         }
 
+        [Method("读取", description: "读取定重心台参数")]
         public DriverReturnValueModel Read(DriverAddressIoArgModel ioarg)
         {
             return TestRead(ioarg);
