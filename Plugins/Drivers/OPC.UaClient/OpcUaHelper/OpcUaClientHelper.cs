@@ -1,4 +1,4 @@
-using Opc.Ua;
+﻿using Opc.Ua;
 using Opc.Ua.Client;
 using System;
 using System.Collections.Generic;
@@ -113,10 +113,8 @@ namespace OpcUaHelper
         /// connect to server
         /// </summary>
         /// <param name="serverUrl">remote url</param>
-        /// <param name="useSecurity">whether to use security</param>
-        public async Task ConnectServer( string serverUrl, bool useSecurity = true )
+        public async Task ConnectServer( string serverUrl )
         {
-            UseSecurity = useSecurity;
             m_session = await Connect( serverUrl );
         }
 
@@ -215,7 +213,7 @@ namespace OpcUaHelper
         /// <summary>
         /// Handles a keep alive event from a session.
         /// </summary>
-        private void Session_KeepAlive( ISession session, KeepAliveEventArgs e )
+        private void Session_KeepAlive( Session session, KeepAliveEventArgs e )
         {
             try
             {
@@ -398,15 +396,6 @@ namespace OpcUaHelper
         /// </summary>
         public ApplicationConfiguration AppConfig => m_configuration;
 
-        /// <summary>
-        /// 设置客户端配置
-        /// </summary>
-        /// <param name="config">OPC UA 客户端配置</param>
-        public void SetClientConfiguration(ApplicationConfiguration config)
-        {
-            m_configuration = config;
-        }
-
         #endregion Public Members
 
         #region Node Write/Read Support
@@ -418,11 +407,6 @@ namespace OpcUaHelper
         /// <returns>DataValue</returns>
         public DataValue ReadNode( NodeId nodeId )
         {
-            if (nodeId == null)
-            {
-                return new DataValue(StatusCodes.BadNodeIdInvalid);
-            }
-
             ReadValueIdCollection nodesToRead = new ReadValueIdCollection
             {
                 new ReadValueId( )
@@ -432,47 +416,19 @@ namespace OpcUaHelper
                 }
             };
 
-            try
-            {
-                // read the current value
-                m_session.Read(
-                    null,
-                    0,
-                    TimestampsToReturn.Neither,
-                    nodesToRead,
-                    out DataValueCollection results,
-                    out DiagnosticInfoCollection diagnosticInfos );
+            // read the current value
+            m_session.Read(
+                null,
+                0,
+                TimestampsToReturn.Neither,
+                nodesToRead,
+                out DataValueCollection results,
+                out DiagnosticInfoCollection diagnosticInfos );
 
-                ClientBase.ValidateResponse( results, nodesToRead );
-                ClientBase.ValidateDiagnosticInfos( diagnosticInfos, nodesToRead );
+            ClientBase.ValidateResponse( results, nodesToRead );
+            ClientBase.ValidateDiagnosticInfos( diagnosticInfos, nodesToRead );
 
-                if (results == null || results.Count == 0)
-                {
-                    return new DataValue(StatusCodes.BadUnexpectedError);
-                }
-
-                var result = results[0];
-                if (result == null)
-                {
-                    return new DataValue(StatusCodes.BadUnexpectedError);
-                }
-
-                if (StatusCode.IsBad(result.StatusCode))
-                {
-                    return new DataValue(result.StatusCode);
-                }
-
-                if (result.Value == null)
-                {
-                    return new DataValue(StatusCodes.BadUnexpectedError);
-                }
-
-                return result;
-            }
-            catch (Exception ex)
-            {
-                return new DataValue(StatusCodes.BadUnexpectedError);
-            }
+            return results[0];
         }
 
         /// <summary>
@@ -1195,105 +1151,156 @@ namespace OpcUaHelper
         /// <summary>
         /// 读取一个节点的所有属性
         /// </summary>
-        /// <param name="nodeId">节点ID</param>
-        /// <returns>属性名称和值的字典</returns>
-        public Dictionary<string, object> ReadNodeAttributes(NodeId nodeId)
+        /// <param name="tag">节点信息</param>
+        /// <returns>节点的特性值</returns>
+        public OpcNodeAttribute[] ReadNodeAttributes( string tag )
         {
-            var attributes = new Dictionary<string, object>();
-            
-            if (nodeId == null)
+            NodeId sourceId = new NodeId( tag );
+            ReadValueIdCollection nodesToRead = new ReadValueIdCollection( );
+
+            // attempt to read all possible attributes.
+            // 尝试着去读取所有可能的特性
+            for (uint ii = Attributes.NodeClass; ii <= Attributes.UserExecutable; ii++)
             {
-                throw new ArgumentNullException(nameof(nodeId));
+                ReadValueId nodeToRead = new ReadValueId( );
+                nodeToRead.NodeId = sourceId;
+                nodeToRead.AttributeId = ii;
+                nodesToRead.Add( nodeToRead );
             }
 
-            // 创建要读取的属性列表
-            var attributesToRead = new ReadValueIdCollection
-            {
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.NodeId },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.NodeClass },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.BrowseName },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.DisplayName },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.Description },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.WriteMask },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.UserWriteMask },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.Value },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.DataType },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.ValueRank },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.ArrayDimensions },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.AccessLevel },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.UserAccessLevel },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.MinimumSamplingInterval },
-                new ReadValueId { NodeId = nodeId, AttributeId = Attributes.Historizing }
-            };
+            int startOfProperties = nodesToRead.Count;
 
-            try
-            {
-                // 读取属性
-                m_session.Read(
-                    null,
-                    0,
-                    TimestampsToReturn.Neither,
-                    attributesToRead,
-                    out DataValueCollection results,
-                    out DiagnosticInfoCollection diagnosticInfos);
+            // find all of the pror of the node.
+            BrowseDescription nodeToBrowse1 = new BrowseDescription( );
 
-                if (results == null || results.Count == 0)
+            nodeToBrowse1.NodeId = sourceId;
+            nodeToBrowse1.BrowseDirection = BrowseDirection.Forward;
+            nodeToBrowse1.ReferenceTypeId = ReferenceTypeIds.HasProperty;
+            nodeToBrowse1.IncludeSubtypes = true;
+            nodeToBrowse1.NodeClassMask = 0;
+            nodeToBrowse1.ResultMask = (uint)BrowseResultMask.All;
+
+            BrowseDescriptionCollection nodesToBrowse = new BrowseDescriptionCollection( );
+            nodesToBrowse.Add( nodeToBrowse1 );
+
+            // fetch property references from the server.
+            ReferenceDescriptionCollection references = FormUtils.Browse( m_session, nodesToBrowse, false );
+
+            if (references == null)
+            {
+                return new OpcNodeAttribute[0];
+            }
+
+            for (int ii = 0; ii < references.Count; ii++)
+            {
+                // ignore external references.
+                if (references[ii].NodeId.IsAbsolute)
                 {
-                    throw new Exception($"Failed to read attributes for node {nodeId}");
+                    continue;
                 }
 
-                // 检查第一个结果是否为 BadNodeIdUnknown
-                if (StatusCode.IsBad(results[0].StatusCode) && 
-                    results[0].StatusCode == StatusCodes.BadNodeIdUnknown)
-                {
-                    throw new Exception($"Node not found: {nodeId}");
-                }
+                ReadValueId nodeToRead = new ReadValueId( );
+                nodeToRead.NodeId = (NodeId)references[ii].NodeId;
+                nodeToRead.AttributeId = Attributes.Value;
+                nodesToRead.Add( nodeToRead );
+            }
 
-                ClientBase.ValidateResponse(results, attributesToRead);
-                ClientBase.ValidateDiagnosticInfos(diagnosticInfos, attributesToRead);
+            // read all values.
+            DataValueCollection results = null;
+            DiagnosticInfoCollection diagnosticInfos = null;
 
-                // 处理结果
-                for (int i = 0; i < attributesToRead.Count; i++)
+            m_session.Read(
+                null,
+                0,
+                TimestampsToReturn.Neither,
+                nodesToRead,
+                out results,
+                out diagnosticInfos );
+
+            ClientBase.ValidateResponse( results, nodesToRead );
+            ClientBase.ValidateDiagnosticInfos( diagnosticInfos, nodesToRead );
+
+            // process results.
+
+            List<OpcNodeAttribute> nodeAttribute = new List<OpcNodeAttribute>( );
+            for (int ii = 0; ii < results.Count; ii++)
+            {
+                OpcNodeAttribute item = new OpcNodeAttribute( );
+
+                // process attribute value.
+                if (ii < startOfProperties)
                 {
-                    if (StatusCode.IsGood(results[i].StatusCode))
+                    // ignore attributes which are invalid for the node.
+                    if (results[ii].StatusCode == StatusCodes.BadAttributeIdInvalid)
                     {
-                        string attributeName = GetAttributeName(attributesToRead[i].AttributeId);
-                        attributes[attributeName] = results[i].Value;
+                        continue;
+                    }
+
+                    // get the name of the attribute.
+                    item.Name = Attributes.GetBrowseName( nodesToRead[ii].AttributeId );
+
+                    // display any unexpected error.
+                    if (StatusCode.IsBad( results[ii].StatusCode ))
+                    {
+                        item.Type = Utils.Format( "{0}", Attributes.GetDataTypeId( nodesToRead[ii].AttributeId ) );
+                        item.Value = Utils.Format( "{0}", results[ii].StatusCode );
+                    }
+
+                    // display the value.
+                    else
+                    {
+                        TypeInfo typeInfo = TypeInfo.Construct( results[ii].Value );
+
+                        item.Type = typeInfo.BuiltInType.ToString( );
+
+                        if (typeInfo.ValueRank >= ValueRanks.OneOrMoreDimensions)
+                        {
+                            item.Type += "[]";
+                        }
+
+                        item.Value = results[ii].Value;//Utils.Format("{0}", results[ii].Value);
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                throw new Exception($"Error reading attributes for node {nodeId}: {ex.Message}", ex);
+
+                // process property value.
+                else
+                {
+                    // ignore properties which are invalid for the node.
+                    if (results[ii].StatusCode == StatusCodes.BadNodeIdUnknown)
+                    {
+                        continue;
+                    }
+
+                    // get the name of the property.
+                    item.Name = Utils.Format( "{0}", references[ii - startOfProperties] );
+
+                    // display any unexpected error.
+                    if (StatusCode.IsBad( results[ii].StatusCode ))
+                    {
+                        item.Type = String.Empty;
+                        item.Value = Utils.Format( "{0}", results[ii].StatusCode );
+                    }
+
+                    // display the value.
+                    else
+                    {
+                        TypeInfo typeInfo = TypeInfo.Construct( results[ii].Value );
+
+                        item.Type = typeInfo.BuiltInType.ToString( );
+
+                        if (typeInfo.ValueRank >= ValueRanks.OneOrMoreDimensions)
+                        {
+                            item.Type += "[]";
+                        }
+
+                        item.Value = results[ii].Value; //Utils.Format("{0}", results[ii].Value);
+                    }
+                }
+
+                nodeAttribute.Add( item );
             }
 
-            return attributes;
-        }
-
-        /// <summary>
-        /// 获取属性的名称
-        /// </summary>
-        private string GetAttributeName(uint attributeId)
-        {
-            switch (attributeId)
-            {
-                case Attributes.NodeId: return "NodeId";
-                case Attributes.NodeClass: return "NodeClass";
-                case Attributes.BrowseName: return "BrowseName";
-                case Attributes.DisplayName: return "DisplayName";
-                case Attributes.Description: return "Description";
-                case Attributes.WriteMask: return "WriteMask";
-                case Attributes.UserWriteMask: return "UserWriteMask";
-                case Attributes.Value: return "Value";
-                case Attributes.DataType: return "DataType";
-                case Attributes.ValueRank: return "ValueRank";
-                case Attributes.ArrayDimensions: return "ArrayDimensions";
-                case Attributes.AccessLevel: return "AccessLevel";
-                case Attributes.UserAccessLevel: return "UserAccessLevel";
-                case Attributes.MinimumSamplingInterval: return "MinimumSamplingInterval";
-                case Attributes.Historizing: return "Historizing";
-                default: return $"Attribute_{attributeId}";
-            }
+            return nodeAttribute.ToArray( );
         }
 
         /// <summary>
@@ -1301,7 +1308,7 @@ namespace OpcUaHelper
         /// </summary>
         /// <param name="tag">节点值</param>
         /// <returns>所有的数据</returns>
-        public DataValue[] ReadNoteDataValueAttributes( string tag )
+        public DataValue[] ReadNodeDataValueAttributes( string tag )
         {
             NodeId sourceId = new NodeId( tag );
             ReadValueIdCollection nodesToRead = new ReadValueIdCollection( );

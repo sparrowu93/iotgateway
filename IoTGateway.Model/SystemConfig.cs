@@ -66,6 +66,8 @@ namespace IoTGateway.Model
         [Display(Name = "HTTP")]
         HTTP = 9,
         [Display(Name = "WebSocket")]
-        WebSocket = 10
+        WebSocket = 10,
+        [Display(Name = "ThingsPanel")]
+        ThingsPanel = 11
     }
 }

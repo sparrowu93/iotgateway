@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -74,9 +74,7 @@ namespace IoTGateway
             services.AddHostedService<IoTBackgroundService>();
             services.AddSingleton<DeviceService>();
             services.AddSingleton<DriverService>();
-            services.AddSingleton<UAService>();
-            services.AddSingleton<MyMqttClient>();
-            // modbusslave 模拟设备
+            services.AddSingleton<MessageService>();
             services.AddSingleton<ModbusSlaveService>();
         }
 

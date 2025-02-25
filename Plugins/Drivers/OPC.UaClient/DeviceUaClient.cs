@@ -1,4 +1,4 @@
-using Opc.Ua;
+﻿using Opc.Ua;
 using OpcUaHelper;
 using PluginInterface;
 using Microsoft.Extensions.Logging;
@@ -11,35 +11,30 @@ namespace OPC.UaClient
     public class DeviceUaClient : IDriver, IAddressDefinitionProvider
     {
         private OpcUaClientHelper? _opcUaClient;
-        private readonly string _device;
-        private bool _isConnected;
-        private ApplicationConfiguration? _clientConfig;
-
         public ILogger _logger { get; set; }
+        private readonly string _device;
 
         #region 配置参数
 
         [ConfigParameter("设备Id")] public string DeviceId { get; set; }
 
-        [ConfigParameter("服务器地址")]
+        [ConfigParameter("uri")]
         public string Uri { get; set; } = "opc.tcp://localhost:62541/Quickstarts/ReferenceServer";
 
         [ConfigParameter("超时时间ms")] public int Timeout { get; set; } = 3000;
 
         [ConfigParameter("最小通讯周期ms")] public uint MinPeriod { get; set; } = 3000;
 
-        [ConfigParameter("使用安全连接")] public bool UseSecurity { get; set; } = false;
-
         #endregion
 
         #region 生命周期
 
         /// <summary>
-        /// 构造函数
+        /// 反射构造函数
         /// </summary>
         /// <param name="device"></param>
         /// <param name="logger"></param>
-        public DeviceUaClient(string device, ILogger<DeviceUaClient> logger)
+        public DeviceUaClient(string device, ILogger logger)
         {
             _device = device;
             _logger = logger;
@@ -48,22 +43,9 @@ namespace OPC.UaClient
         }
 
         /// <summary>
-        /// 设置客户端配置
-        /// </summary>
-        /// <param name="config">OPC UA 客户端配置</param>
-        public void SetClientConfiguration(ApplicationConfiguration config)
-        {
-            _clientConfig = config;
-            if (_opcUaClient != null)
-            {
-                _opcUaClient.SetClientConfiguration(config);
-            }
-        }
-
-        /// <summary>
         /// 连接状态
         /// </summary>
-        public bool IsConnected => _isConnected;
+        public bool IsConnected => _opcUaClient is { Connected: true };
 
         /// <summary>
         /// 连接
@@ -73,31 +55,14 @@ namespace OPC.UaClient
         {
             try
             {
-                _logger.LogInformation($"Device:[{_device}],Connect() to {Uri}");
+                _logger.LogInformation($"Device:[{_device}],Connect()");
 
                 _opcUaClient = new OpcUaClientHelper();
-                if (_clientConfig != null)
-                {
-                    _opcUaClient.SetClientConfiguration(_clientConfig);
-                }
-                var connectTask = _opcUaClient.ConnectServer(Uri, UseSecurity);
-                
-                if (!connectTask.Wait(60000)) // 使用与 OpcUaClientHelper 相同的超时时间
-                {
-                    _logger.LogError($"Device:[{_device}],Connect() timeout after 60 seconds");
-                    return false;
-                }
-                _isConnected = true;
-            }
-            catch (AggregateException ex)
-            {
-                var innerException = ex.InnerException;
-                _logger.LogError(innerException, $"Device:[{_device}],Connect() failed: {innerException?.Message}");
-                return false;
+                _opcUaClient.ConnectServer(Uri).Wait(Timeout);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Device:[{_device}],Connect() failed: {ex.Message}");
+                _logger.LogInformation($"Device:[{_device}],Connect()");
                 return false;
             }
 
@@ -115,7 +80,6 @@ namespace OPC.UaClient
                 _logger.LogInformation($"Device:[{_device}],Close()");
 
                 _opcUaClient?.Disconnect();
-                _isConnected = false;
                 return !IsConnected;
             }
             catch (Exception ex)
@@ -153,123 +117,27 @@ namespace OPC.UaClient
         {
             var ret = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good };
 
-            if (!IsConnected)
+            if (IsConnected)
+            {
+                try
+                {
+                    var dataValue = _opcUaClient?.ReadNode(new NodeId(ioArg.Address));
+                    if (DataValue.IsGood(dataValue))
+                        ret.Value = dataValue?.Value;
+                }
+                catch (Exception ex)
+                {
+                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                    ret.Message = $"读取失败,{ex.Message}";
+                }
+            }
+            else
             {
                 ret.StatusType = VaribaleStatusTypeEnum.Bad;
                 ret.Message = "连接失败";
-                _logger.LogError($"Device:[{_device}],ReadNode({ioArg.Address}) failed: not connected");
-                return ret;
-            }
-
-            try
-            {
-                if (_opcUaClient == null)
-                {
-                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
-                    ret.Message = "OPC UA 客户端未初始化";
-                    _logger.LogError($"Device:[{_device}],ReadNode({ioArg.Address}) failed: client not initialized");
-                    return ret;
-                }
-
-                _logger.LogInformation($"Device:[{_device}],ReadNode({ioArg.Address}) attempting to read node");
-                var nodeId = new NodeId(ioArg.Address);
-                var dataValue = _opcUaClient.ReadNode(nodeId);
-
-                if (dataValue == null)
-                {
-                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
-                    ret.Message = "读取失败，返回值为空";
-                    _logger.LogError($"Device:[{_device}],ReadNode({ioArg.Address}) failed: null data value");
-                    return ret;
-                }
-
-                if (!DataValue.IsGood(dataValue))
-                {
-                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
-                    ret.Message = $"读取失败: {dataValue.StatusCode}";
-                    _logger.LogError($"Device:[{_device}],ReadNode({ioArg.Address}) failed: {dataValue.StatusCode}");
-                    return ret;
-                }
-
-                ret.Value = dataValue.Value;
-                if (ret.Value == null)
-                {
-                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
-                    ret.Message = "读取到空值";
-                    _logger.LogError($"Device:[{_device}],ReadNode({ioArg.Address}) failed: null value");
-                }
-                else
-                {
-                    _logger.LogInformation($"Device:[{_device}],ReadNode({ioArg.Address}) succeeded: {ret.Value}");
-                }
-            }
-            catch (Exception ex)
-            {
-                ret.StatusType = VaribaleStatusTypeEnum.Bad;
-                ret.Message = $"读取失败: {ex.Message}";
-                _logger.LogError(ex, $"Device:[{_device}],ReadNode({ioArg.Address}) failed with exception");
             }
 
             return ret;
-        }
-
-        [Method("读取节点属性", description: "读取OPCUa节点的所有属性")]
-        public Dictionary<string, DriverReturnValueModel> ReadNodeAttributes(DriverAddressIoArgModel ioArg)
-        {
-            var result = new Dictionary<string, DriverReturnValueModel>();
-
-            if (!IsConnected)
-            {
-                var errorResult = new DriverReturnValueModel 
-                { 
-                    StatusType = VaribaleStatusTypeEnum.Bad,
-                    Message = "连接失败"
-                };
-                result.Add("Error", errorResult);
-                _logger.LogError($"Device:[{_device}],ReadNodeAttributes({ioArg.Address}) failed: not connected");
-                return result;
-            }
-
-            try
-            {
-                if (_opcUaClient == null)
-                {
-                    var errorResult = new DriverReturnValueModel 
-                    { 
-                        StatusType = VaribaleStatusTypeEnum.Bad,
-                        Message = "OPC UA 客户端未初始化"
-                    };
-                    result.Add("Error", errorResult);
-                    _logger.LogError($"Device:[{_device}],ReadNodeAttributes({ioArg.Address}) failed: client not initialized");
-                    return result;
-                }
-
-                _logger.LogInformation($"Device:[{_device}],ReadNodeAttributes({ioArg.Address}) attempting to read attributes");
-                
-                var attributes = _opcUaClient.ReadNodeAttributes(new NodeId(ioArg.Address));
-                foreach (var attr in attributes)
-                {
-                    result.Add(attr.Key, new DriverReturnValueModel 
-                    { 
-                        StatusType = VaribaleStatusTypeEnum.Good,
-                        Value = attr.Value
-                    });
-                }
-
-                _logger.LogInformation($"Device:[{_device}],ReadNodeAttributes({ioArg.Address}) succeeded, found {attributes.Count} attributes");
-            }
-            catch (Exception ex)
-            {
-                var errorResult = new DriverReturnValueModel 
-                { 
-                    StatusType = VaribaleStatusTypeEnum.Bad,
-                    Message = $"读取属性失败: {ex.Message}"
-                };
-                result.Add("Error", errorResult);
-                _logger.LogError(ex, $"Device:[{_device}],ReadNodeAttributes({ioArg.Address}) failed with exception");
-            }
-
-            return result;
         }
 
         [Method("测试方法", description: "测试方法，返回当前时间")]
@@ -295,7 +163,7 @@ namespace OPC.UaClient
             return rpcResponse;
         }
 
-        public Dictionary<string, AddressDefinitionInfo> GetAddressDefinitions()
+         public Dictionary<string, AddressDefinitionInfo> GetAddressDefinitions()
         {
             return UaClientAddressDefinitions.GetDefinitions();
         }

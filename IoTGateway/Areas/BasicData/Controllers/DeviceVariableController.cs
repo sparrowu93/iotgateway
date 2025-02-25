@@ -1,16 +1,11 @@
-using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System;
-using System.Linq;
 using WalkingTec.Mvvm.Core;
 using WalkingTec.Mvvm.Mvc;
 using WalkingTec.Mvvm.Core.Extensions;
 using IoTGateway.ViewModel.BasicData.DeviceVariableVMs;
 using Opc.Ua.Security.Certificates;
-using Microsoft.EntityFrameworkCore;
-using IoTGateway.Model;
-using Plugin;
-using IoTGateway.DataAccess;
 
 namespace IoTGateway.Controllers
 {
@@ -229,7 +224,6 @@ namespace IoTGateway.Controllers
             return PartialView(vm);
         }
 
-        // TODO use API
         [HttpPost]
         [ActionDescription("下发确认按钮")]
         public ActionResult DoSetValue()

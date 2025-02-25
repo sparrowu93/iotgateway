@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using PluginInterface;
 using System.Net;
@@ -17,19 +17,18 @@ namespace Plugin
         public DriverService DriverManager;
 
         public List<DeviceThread> DeviceThreads = new List<DeviceThread>();
-        private readonly MyMqttClient _myMqttClient;
-        private readonly UAService _uAService;
+        private readonly MessageService _messageService;
         private readonly MqttServer _mqttServer;
         private readonly string _connnectSetting = IoTBackgroundService.connnectSetting;
         private readonly DBTypeEnum _dbType = IoTBackgroundService.DbType;
 
         //UAService? uAService, 
-        public DeviceService(IConfiguration configRoot, DriverService driverManager, MyMqttClient myMqttClient,
+        public DeviceService(IConfiguration configRoot, DriverService driverManager, MessageService messageService,
             MqttServer mqttServer, ILogger<DeviceService> logger)
         {
             _logger = logger;
             DriverManager = driverManager;
-            _myMqttClient = myMqttClient;
+            _messageService = messageService;
             //_uAService = uAService;
             _mqttServer = mqttServer ?? throw new ArgumentNullException(nameof(mqttServer));
 
@@ -152,7 +151,7 @@ namespace Plugin
                         if (deviceObj != null && systemManage != null)
                         {
                             var deviceThread = new DeviceThread(device, deviceObj, systemManage.GatewayName,
-                                _myMqttClient,
+                                _messageService,
                                 _mqttServer, _logger);
                             DeviceThreads.Add(deviceThread);
                         }
@@ -217,42 +216,6 @@ namespace Plugin
             }
 
             return driverFilesComboSelect;
-        }
-
-        public IDriver GetDriver(Guid? deviceId)
-        {
-            if (!deviceId.HasValue)
-                return null;
-
-            try
-            {
-                _logger.LogInformation($"GetDriver Start:{deviceId}");
-                using var dc = new DataContext(_connnectSetting, _dbType);
-                var device = dc.Set<Device>().Include(x => x.Driver).FirstOrDefault(x => x.ID == deviceId);
-                if (device?.Driver == null)
-                    return null;
-
-                var driver = DriverManager.DriverInfos
-                    .SingleOrDefault(x => x.Type.FullName == device.Driver.AssembleName);
-                if (driver == null)
-                {
-                    _logger.LogError($"找不到设备:[{device.DeviceName}]的驱动:[{device.Driver.AssembleName}]");
-                    return null;
-                }
-
-                Type[] types = new Type[] { typeof(string), typeof(ILogger) };
-                object[] param = new object[] { device.DeviceName, _logger };
-
-                ConstructorInfo? constructor = driver.Type.GetConstructor(types);
-                var deviceObj = constructor?.Invoke(param) as IDriver;
-                _logger.LogInformation($"GetDriver End:{deviceId}");
-                return deviceObj;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"GetDriver Error:{deviceId}", ex);
-                return null;
-            }
         }
 
         public void Dispose()
