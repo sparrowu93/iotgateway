@@ -1,197 +1,426 @@
-using Microsoft.Extensions.Logging;
-using Moq;
-using Xunit;
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Xunit;
+using Xunit.Abstractions;
+using OPC.UaClient;
+using Microsoft.Extensions.Logging;
+using DriverOpcUaClient;
 using PluginInterface;
-using Opc.Ua;
-using Opc.Ua.Client;
 
 namespace OPC.UaClient.Tests
 {
-    public class DeviceUaClientTests : IDisposable
+    // Custom test logger that implements ILogger directly
+    public class TestLogger : ILogger
     {
-        private readonly Mock<ILogger<DeviceUaClient>> _loggerMock;
-        private readonly DeviceUaClient _client;
-        private const string TEST_DEVICE = "TestDevice";
-        private const string SIMULATION_SERVER = "opc.tcp://localhost:53530/OPCUA/SimulationServer";
-        private const string INVALID_SERVER = "opc.tcp://localhost:12345";
-        private const string COUNTER_NODE = "ns=3;i=1001";
-        private const string RANDOM_NODE = "ns=3;i=1002";
-        private const string INVALID_NODE = "ns=3;i=9999";
+        private readonly ITestOutputHelper _output;
 
-        public DeviceUaClientTests()
+        public TestLogger(ITestOutputHelper output)
         {
-            _loggerMock = new Mock<ILogger<DeviceUaClient>>();
-            _client = new DeviceUaClient(TEST_DEVICE, _loggerMock.Object)
-            {
-                Uri = SIMULATION_SERVER,
-                Timeout = 60000, 
-                MinPeriod = 3000,
-                UseSecurity = false 
-            };
+            _output = output;
+        }
 
-            // 配置 OPC UA 客户端安全策略
-            var clientConfig = new ApplicationConfiguration()
+        public IDisposable BeginScope<TState>(TState state) => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
+        {
+            _output.WriteLine($"[{logLevel}] {formatter(state, exception)}");
+        }
+    }
+
+    public class DeviceUaClientTests
+    {
+        private readonly ITestOutputHelper _output;
+        private readonly ILogger _logger;
+
+        public DeviceUaClientTests(ITestOutputHelper output)
+        {
+            _output = output;
+            _logger = new TestLogger(output);
+        }
+
+        [Fact]
+        public void TestConnection()
+        {
+            Console.WriteLine("Starting OPC UA connection test...");
+            var stopwatch = Stopwatch.StartNew();
+            
+            try
             {
-                ApplicationName = "IoTGateway Test Client",
-                ApplicationType = ApplicationType.Client,
-                SecurityConfiguration = new SecurityConfiguration
+                Console.WriteLine("Creating device instance...");
+                var device = new OpcUaClient("TestDevice", _logger);
+                Console.WriteLine($"Device instance created in {stopwatch.ElapsedMilliseconds}ms");
+
+                // Configure device
+                Console.WriteLine("Configuring device parameters...");
+                device.ServerUrl = "opc.tcp://Karels-MacBook-Air.local:53530/OPCUA/SimulationServer";
+                device.Timeout = 15000;
+                Console.WriteLine($"Device configuration completed in {stopwatch.ElapsedMilliseconds}ms");
+
+                // Connect to server
+                Console.WriteLine("Attempting to connect to OPC UA server...");
+                Console.WriteLine($"Server URL: {device.ServerUrl}");
+                Console.WriteLine($"Connect timeout: {device.Timeout}ms");
+                
+                var connectResult = device.Connect();
+                Console.WriteLine($"Connection attempt completed in {stopwatch.ElapsedMilliseconds}ms with result: {connectResult}");
+
+                Assert.True(connectResult, "Connection to OPC UA server failed");
+                
+                // If connected, try to disconnect
+                if (connectResult)
                 {
-                    ApplicationCertificate = new CertificateIdentifier(),
-                    TrustedPeerCertificates = new CertificateTrustList(),
-                    TrustedIssuerCertificates = new CertificateTrustList(),
-                    RejectedCertificateStore = new CertificateTrustList(),
-                    AutoAcceptUntrustedCertificates = true,
-                    AddAppCertToTrustedStore = true
-                },
-                TransportConfigurations = new TransportConfigurationCollection(),
-                TransportQuotas = new TransportQuotas { OperationTimeout = 1500 },
-                ClientConfiguration = new ClientConfiguration { 
-                    DefaultSessionTimeout = 6000,
-                    MinSubscriptionLifetime = 5000
+                    Console.WriteLine("Connection successful, attempting to disconnect...");
+                    device.Close();
+                    Console.WriteLine("Disconnected successfully");
                 }
-            };
-
-            clientConfig.Validate(ApplicationType.Client);
-            _client.SetClientConfiguration(clientConfig);
-
-            // 设置安全模式
-            var endpointDescription = CoreClientUtils.SelectEndpoint(SIMULATION_SERVER, false);
-            if (endpointDescription != null)
+            }
+            catch (Exception ex)
             {
-                endpointDescription.SecurityMode = MessageSecurityMode.None;
-                endpointDescription.SecurityPolicyUri = SecurityPolicies.None;
+                Console.WriteLine($"Exception occurred: {ex.GetType().Name}");
+                Console.WriteLine($"Message: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"Inner exception: {ex.InnerException.GetType().Name}");
+                    Console.WriteLine($"Inner message: {ex.InnerException.Message}");
+                }
+                
+                throw;
+            }
+            finally
+            {
+                stopwatch.Stop();
+                Console.WriteLine($"Test completed in {stopwatch.ElapsedMilliseconds}ms");
             }
         }
 
         [Fact]
-        public void Connect_ToSimulationServer_ShouldSucceed()
+        public void TestBrowse()
         {
-            // Act
-            var result = _client.Connect();
-
-            // Assert
-            Assert.True(result, "Should successfully connect to simulation server");
-            Assert.True(_client.IsConnected);
-        }
-
-        [Fact]
-        public void Connect_ToInvalidServer_ShouldFail()
-        {
-            // Arrange
-            _client.Uri = INVALID_SERVER;
-
-            // Act
-            var result = _client.Connect();
-
-            // Assert
-            Assert.False(result);
-            Assert.False(_client.IsConnected);
-        }
-
-        [Fact]
-        public void ReadNode_WhenNotConnected_ShouldReturnBadStatus()
-        {
-            // Arrange
-            var nodeArg = new DriverAddressIoArgModel 
-            { 
-                Address = "ns=3;s=Counter1" 
-            };
-
-            // Act
-            var result = _client.ReadNode(nodeArg);
-
-            // Assert
-            Assert.NotNull(result);
-            Assert.Equal(VaribaleStatusTypeEnum.Bad, result.StatusType);
-            Assert.Equal("连接失败", result.Message);
-        }
-
-        [Fact]
-        public void ReadNode_Counter1_ShouldReturnValue()
-        {
-            // Arrange
-            _client.Connect();
-
-            // Act
-            var result = _client.ReadNode(new DriverAddressIoArgModel { Address = COUNTER_NODE });
-
-            // Assert
-            Assert.Equal(VaribaleStatusTypeEnum.Good, result.StatusType);
-            Assert.NotNull(result.Value);
-        }
-
-        [Fact]
-        public void ReadNode_RandomValue_ShouldReturnValue()
-        {
-            // Arrange
-            _client.Connect();
-
-            // Act
-            var result = _client.ReadNode(new DriverAddressIoArgModel { Address = RANDOM_NODE });
-
-            // Assert
-            Assert.Equal(VaribaleStatusTypeEnum.Good, result.StatusType);
-            Assert.NotNull(result.Value);
-        }
-
-        [Fact]
-        public void ReadNode_InvalidNode_ShouldReturnBadStatus()
-        {
-            // Arrange
-            _client.Connect();
-
-            // Act
-            var result = _client.ReadNode(new DriverAddressIoArgModel { Address = INVALID_NODE });
-
-            // Assert
-            Assert.Equal(VaribaleStatusTypeEnum.Bad, result.StatusType);
-            Assert.NotNull(result.Message);
-        }
-
-        [Fact]
-        public void ReadNodeAttributes_Counter1_ShouldReturnAttributes()
-        {
-            // Arrange
-            _client.Connect();
-
-            // Act
-            var result = _client.ReadNodeAttributes(new DriverAddressIoArgModel { Address = COUNTER_NODE });
-
-            // Assert
-            Assert.NotNull(result);
-            Assert.True(result.Count > 0);
-            Assert.DoesNotContain("Error", result.Keys);
+            Console.WriteLine("Starting OPC UA browse test...");
+            var stopwatch = Stopwatch.StartNew();
+            OpcUaClient device = null;
             
-            // 验证必要的属性存在
-            Assert.Contains("NodeId", result.Keys);
-            Assert.Contains("DisplayName", result.Keys);
-            Assert.Contains("Value", result.Keys);
-            Assert.Contains("DataType", result.Keys);
-            
-            // 验证属性值
-            Assert.Equal(VaribaleStatusTypeEnum.Good, result["Value"].StatusType);
-            Assert.NotNull(result["Value"].Value);
+            try
+            {
+                // 创建并连接设备
+                device = new OpcUaClient("TestDevice", _logger);
+                device.ServerUrl = "opc.tcp://Karels-MacBook-Air.local:53530/OPCUA/SimulationServer";
+                device.Timeout = 15000;
+                
+                var connectResult = device.Connect();
+                Assert.True(connectResult, "Connection to OPC UA server failed");
+                Console.WriteLine($"Connected to server in {stopwatch.ElapsedMilliseconds}ms");
+                
+                // 浏览根节点
+                Console.WriteLine("Browsing root folder...");
+                var rootBrowseResult = device.Browse(new DriverAddressIoArgModel { Address = "" });
+                Assert.Equal(VaribaleStatusTypeEnum.Good, rootBrowseResult.StatusType);
+                Assert.NotNull(rootBrowseResult.Value);
+                
+                // 输出根节点浏览结果
+                var rootNodes = rootBrowseResult.Value as List<Dictionary<string, object>>;
+                Assert.NotNull(rootNodes);
+                
+                Console.WriteLine($"Found {rootNodes.Count} nodes at root level:");
+                foreach (var node in rootNodes)
+                {
+                    Console.WriteLine($"Node: {node["DisplayName"]} ({node["NodeClass"]}) - {node["NodeId"]}");
+                }
+                
+                // 查找对象节点并继续浏览
+                var objectsNode = rootNodes.FirstOrDefault(n => n["DisplayName"].ToString() == "Objects");
+                Assert.True(objectsNode != null, "Objects node not found");
+                
+                // 浏览对象节点
+                Console.WriteLine($"Browsing Objects node ({objectsNode["NodeId"]})...");
+                var objectsBrowseResult = device.Browse(new DriverAddressIoArgModel { Address = objectsNode["NodeId"].ToString() });
+                Assert.Equal(VaribaleStatusTypeEnum.Good, objectsBrowseResult.StatusType);
+                
+                var objectsChildren = objectsBrowseResult.Value as List<Dictionary<string, object>>;
+                Assert.NotNull(objectsChildren);
+                
+                Console.WriteLine($"Found {objectsChildren.Count} nodes under Objects:");
+                foreach (var node in objectsChildren)
+                {
+                    Console.WriteLine($"Node: {node["DisplayName"]} ({node["NodeClass"]}) - {node["NodeId"]}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Exception occurred: {ex.GetType().Name}");
+                Console.WriteLine($"Message: {ex.Message}");
+                throw;
+            }
+            finally
+            {
+                device?.Close();
+                stopwatch.Stop();
+                Console.WriteLine($"Test completed in {stopwatch.ElapsedMilliseconds}ms");
+            }
         }
 
         [Fact]
-        public void ReadNodeAttributes_InvalidNode_ShouldReturnError()
+        public void TestRead()
         {
-            // Arrange
-            _client.Connect();
-
-            // Act
-            var result = _client.ReadNodeAttributes(new DriverAddressIoArgModel { Address = INVALID_NODE });
-
-            // Assert
-            Assert.NotNull(result);
-            Assert.Contains("Error", result.Keys);
-            Assert.Equal(VaribaleStatusTypeEnum.Bad, result["Error"].StatusType);
+            Console.WriteLine("Starting OPC UA read test...");
+            var stopwatch = Stopwatch.StartNew();
+            OpcUaClient device = null;
+            
+            try
+            {
+                // 创建并连接设备
+                device = new OpcUaClient("TestDevice", _logger);
+                device.ServerUrl = "opc.tcp://Karels-MacBook-Air.local:53530/OPCUA/SimulationServer";
+                device.Timeout = 15000;
+                
+                var connectResult = device.Connect();
+                Assert.True(connectResult, "Connection to OPC UA server failed");
+                Console.WriteLine($"Connected to server in {stopwatch.ElapsedMilliseconds}ms");
+                
+                // 浏览根节点查找可读取的变量
+                Console.WriteLine("Browsing to find variables for reading...");
+                var rootBrowseResult = device.Browse(new DriverAddressIoArgModel { Address = "" });
+                var rootNodes = rootBrowseResult.Value as List<Dictionary<string, object>>;
+                
+                // 查找对象节点
+                var objectsNode = rootNodes.FirstOrDefault(n => n["DisplayName"].ToString() == "Objects");
+                var objectsBrowseResult = device.Browse(new DriverAddressIoArgModel { Address = objectsNode["NodeId"].ToString() });
+                var objectsChildren = objectsBrowseResult.Value as List<Dictionary<string, object>>;
+                
+                // 搜索服务器下的节点
+                var serverNode = objectsChildren.FirstOrDefault(n => n["DisplayName"].ToString().Contains("Server"));
+                if (serverNode != null)
+                {
+                    var serverBrowseResult = device.Browse(new DriverAddressIoArgModel { Address = serverNode["NodeId"].ToString() });
+                    var serverChildren = serverBrowseResult.Value as List<Dictionary<string, object>>;
+                    
+                    // 查找具体变量
+                    foreach (var node in serverChildren)
+                    {
+                        if (node["NodeClass"].ToString() == "Variable")
+                        {
+                            Console.WriteLine($"Reading variable: {node["DisplayName"]} ({node["NodeId"]})");
+                            var readResult = device.Read(new DriverAddressIoArgModel 
+                            { 
+                                Address = node["NodeId"].ToString(),
+                                ValueType = DataTypeEnum.Utf8String
+                            });
+                            
+                            Console.WriteLine($"Result: {readResult.StatusType}, Value: {readResult.Value}, Message: {readResult.Message}");
+                            Assert.Equal(VaribaleStatusTypeEnum.Good, readResult.StatusType);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Exception occurred: {ex.GetType().Name}");
+                Console.WriteLine($"Message: {ex.Message}");
+                throw;
+            }
+            finally
+            {
+                device?.Close();
+                stopwatch.Stop();
+                Console.WriteLine($"Test completed in {stopwatch.ElapsedMilliseconds}ms");
+            }
         }
 
-        public void Dispose()
+        [Fact]
+        public async Task TestWriteAsync()
         {
-            _client?.Dispose();
+            Console.WriteLine("Starting OPC UA write test...");
+            var stopwatch = Stopwatch.StartNew();
+            OpcUaClient device = null;
+            
+            try
+            {
+                // 创建并连接设备
+                device = new OpcUaClient("TestDevice", _logger);
+                device.ServerUrl = "opc.tcp://Karels-MacBook-Air.local:53530/OPCUA/SimulationServer";
+                device.Timeout = 15000;
+                
+                var connectResult = device.Connect();
+                Assert.True(connectResult, "Connection to OPC UA server failed");
+                Console.WriteLine($"Connected to server in {stopwatch.ElapsedMilliseconds}ms");
+                
+                // 浏览查找可写入的变量
+                Console.WriteLine("Browsing to find variables for writing...");
+                var rootBrowseResult = device.Browse(new DriverAddressIoArgModel { Address = "" });
+                var rootNodes = rootBrowseResult.Value as List<Dictionary<string, object>>;
+                
+                // 查找对象节点
+                var objectsNode = rootNodes.FirstOrDefault(n => n["DisplayName"].ToString() == "Objects");
+                var objectsBrowseResult = device.Browse(new DriverAddressIoArgModel { Address = objectsNode["NodeId"].ToString() });
+                var objectsChildren = objectsBrowseResult.Value as List<Dictionary<string, object>>;
+                
+                // 搜索服务器下的节点
+                var myDeviceNode = objectsChildren.FirstOrDefault(n => n["DisplayName"].ToString().Contains("MyDevice"));
+                if (myDeviceNode != null)
+                {
+                    var myDeviceBrowseResult = device.Browse(new DriverAddressIoArgModel { Address = myDeviceNode["NodeId"].ToString() });
+                    var myDeviceChildren = myDeviceBrowseResult.Value as List<Dictionary<string, object>>;
+                    
+                    // 查找具体变量
+                    var targetVariable = myDeviceChildren.FirstOrDefault(n => 
+                        n["NodeClass"].ToString() == "Variable" && 
+                        (n["DisplayName"].ToString().Contains("Temperature") || n["DisplayName"].ToString().Contains("Pressure")));
+                    
+                    if (targetVariable != null)
+                    {
+                        Console.WriteLine($"Writing to variable: {targetVariable["DisplayName"]} ({targetVariable["NodeId"]})");
+                        
+                        // 读取原始值
+                        var readResult = device.Read(new DriverAddressIoArgModel 
+                        { 
+                            Address = targetVariable["NodeId"].ToString(),
+                            ValueType = DataTypeEnum.Double
+                        });
+                        Console.WriteLine($"Original value: {readResult.Value}");
+                        
+                        // 写入新值
+                        double newValue = 42.0;
+                        var writeResult = await device.WriteAsync("TestWriteRequest", "Write", new DriverAddressIoArgModel
+                        {
+                            Address = targetVariable["NodeId"].ToString(),
+                            Value = newValue
+                        });
+                        
+                        Console.WriteLine($"Write result: {writeResult.IsSuccess}, Description: {writeResult.Description}");
+                        Assert.True(writeResult.IsSuccess, "Write operation failed");
+                        
+                        // 验证写入结果
+                        var verifyResult = device.Read(new DriverAddressIoArgModel 
+                        { 
+                            Address = targetVariable["NodeId"].ToString(),
+                            ValueType = DataTypeEnum.Double
+                        });
+                        Console.WriteLine($"New value after write: {verifyResult.Value}");
+                        Assert.Equal(newValue, verifyResult.Value);
+                    }
+                    else
+                    {
+                        Console.WriteLine("No suitable writable variable found for testing");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Exception occurred: {ex.GetType().Name}");
+                Console.WriteLine($"Message: {ex.Message}");
+                throw;
+            }
+            finally
+            {
+                device?.Close();
+                stopwatch.Stop();
+                Console.WriteLine($"Test completed in {stopwatch.ElapsedMilliseconds}ms");
+            }
+        }
+
+        [Fact]
+        public void TestReadMultiple()
+        {
+            Console.WriteLine("Starting OPC UA multiple read test...");
+            var stopwatch = Stopwatch.StartNew();
+            OpcUaClient device = null;
+            
+            try
+            {
+                // 创建并连接设备
+                device = new OpcUaClient("TestDevice", _logger);
+                device.ServerUrl = "opc.tcp://Karels-MacBook-Air.local:53530/OPCUA/SimulationServer";
+                device.Timeout = 15000;
+                
+                var connectResult = device.Connect();
+                Assert.True(connectResult, "Connection to OPC UA server failed");
+                Console.WriteLine($"Connected to server in {stopwatch.ElapsedMilliseconds}ms");
+                
+                // 先浏览查找可读取的变量
+                List<string> nodesToRead = new List<string>();
+                
+                // 浏览根节点查找可读取的变量
+                Console.WriteLine("Browsing to find variables for reading...");
+                var rootBrowseResult = device.Browse(new DriverAddressIoArgModel { Address = "" });
+                var rootNodes = rootBrowseResult.Value as List<Dictionary<string, object>>;
+                
+                // 查找对象节点
+                var objectsNode = rootNodes.FirstOrDefault(n => n["DisplayName"].ToString() == "Objects");
+                var objectsBrowseResult = device.Browse(new DriverAddressIoArgModel { Address = objectsNode["NodeId"].ToString() });
+                var objectsChildren = objectsBrowseResult.Value as List<Dictionary<string, object>>;
+                
+                // 查找服务器和设备节点
+                foreach (var node in objectsChildren)
+                {
+                    var childBrowseResult = device.Browse(new DriverAddressIoArgModel { Address = node["NodeId"].ToString() });
+                    if (childBrowseResult.StatusType == VaribaleStatusTypeEnum.Good)
+                    {
+                        var children = childBrowseResult.Value as List<Dictionary<string, object>>;
+                        
+                        // 收集变量节点
+                        foreach (var childNode in children)
+                        {
+                            if (childNode["NodeClass"].ToString() == "Variable")
+                            {
+                                nodesToRead.Add(childNode["NodeId"].ToString());
+                                Console.WriteLine($"Added for reading: {childNode["DisplayName"]} ({childNode["NodeId"]})");
+                                
+                                // 最多收集5个节点
+                                if (nodesToRead.Count >= 5)
+                                    break;
+                            }
+                        }
+                    }
+                    
+                    if (nodesToRead.Count >= 5)
+                        break;
+                }
+                
+                // 确保有节点可读
+                Assert.True(nodesToRead.Count > 0, "No variable nodes found for reading");
+                
+                // 执行批量读取
+                Console.WriteLine($"Reading {nodesToRead.Count} nodes at once...");
+                var readMultipleResult = device.ReadMultiple(new DriverAddressIoArgModel 
+                { 
+                    Address = string.Join(",", nodesToRead),
+                    ValueType = DataTypeEnum.Utf8String
+                });
+                
+                Console.WriteLine($"ReadMultiple result: {readMultipleResult.StatusType}, Message: {readMultipleResult.Message}");
+                Assert.Equal(VaribaleStatusTypeEnum.Good, readMultipleResult.StatusType);
+                
+                // 输出读取结果
+                var resultDict = readMultipleResult.Value as Dictionary<string, object>;
+                Assert.NotNull(resultDict);
+                
+                foreach (var kvp in resultDict)
+                {
+                    Console.WriteLine($"Node: {kvp.Key}, Value: {kvp.Value}");
+                }
+                
+                Assert.Equal(nodesToRead.Count, resultDict.Count);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Exception occurred: {ex.GetType().Name}");
+                Console.WriteLine($"Message: {ex.Message}");
+                throw;
+            }
+            finally
+            {
+                device?.Close();
+                stopwatch.Stop();
+                Console.WriteLine($"Test completed in {stopwatch.ElapsedMilliseconds}ms");
+            }
         }
     }
 }

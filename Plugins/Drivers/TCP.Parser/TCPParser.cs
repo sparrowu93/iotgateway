@@ -24,7 +24,7 @@ namespace TCP.Parser
         private UdpClient? _udpClient;
         private NetworkStream? _stream;
         private bool _isRunning;
-        private byte[] _latestData;
+        public byte[] _latestData;
         public ILogger _logger { get; set; }
         private readonly string _device;
 
@@ -477,12 +477,6 @@ namespace TCP.Parser
                     return ret;
                 }
 
-                // 处理设备状态描述
-                if (ioarg.Address == "json:D_STATES_DESC")
-                {
-                    return GetDeviceStateDescription(_latestData);
-                }
-
                 // 处理设备正常状态
                 if (ioarg.Address == "json:DEVICE_NORMAL")
                 {
@@ -498,37 +492,6 @@ namespace TCP.Parser
                 ret.Message = $"测试读取失败: {ex.Message}";
                 return ret;
             }
-        }
-
-        /// <summary>
-        /// 获取设备状态描述
-        /// </summary>
-        protected virtual DriverReturnValueModel GetDeviceStateDescription(byte[] data)
-        {
-            var result = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good };
-            
-            var stateResult = ParseData(new DriverAddressIoArgModel { Address = "json:D_STATES", ValueType = DataTypeEnum.Int32 }, data);
-            if (stateResult.StatusType == VaribaleStatusTypeEnum.Good && 
-                int.TryParse(stateResult.Value?.ToString(), out int state))
-            {
-                // 首先尝试从JSON中获取描述
-                var descResult = ParseData(new DriverAddressIoArgModel { Address = "json:D_STATES_DESC", ValueType = DataTypeEnum.AsciiString }, data);
-                if (descResult.StatusType == VaribaleStatusTypeEnum.Good && descResult.Value != null)
-                {
-                    return descResult;
-                }
-                
-                // 如果JSON中没有描述，则使用映射表
-                if (_deviceStateDescriptions.ContainsKey(state))
-                {
-                    result.Value = _deviceStateDescriptions[state];
-                    return result;
-                }
-            }
-            
-            result.StatusType = VaribaleStatusTypeEnum.Bad;
-            result.Message = "无效的设备状态";
-            return result;
         }
 
         /// <summary>

@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Drivers\OPC.UaClient\OPC.UaClient.csproj" />
+    <ProjectReference Include="..\..\PluginInterface\PluginInterface.csproj">
+    </ProjectReference>
   </ItemGroup>
 
 </Project>
