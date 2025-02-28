@@ -1,4 +1,4 @@
-﻿using PluginInterface;
+using PluginInterface;
 using System.Reflection;
 using System.Text;
 using IoTGateway.DataAccess;
@@ -158,14 +158,26 @@ namespace Plugin
 
                             if (Driver.Connect())
                             {
-                                foreach (var deviceVariables in Device.DeviceVariables!.GroupBy(x => x.Alias))
+                                try 
                                 {
-                                    string deviceName = string.IsNullOrWhiteSpace(deviceVariables.Key)
-                                        ? Device.DeviceName
-                                        : deviceVariables.Key;
+                                    foreach (var deviceVariables in Device.DeviceVariables!.GroupBy(x => x.Alias))
+                                    {
+                                        string deviceName = string.IsNullOrWhiteSpace(deviceVariables.Key)
+                                            ? Device.DeviceName
+                                            : deviceVariables.Key;
 
-                                    _messageService?.DeviceConnected(deviceName, Device);
+                                        _messageService?.DeviceConnected(deviceName, Device);
+                                        _logger?.LogInformation($"Device:[{deviceName}] Connected successfully, attempting to read variables");
+                                    }
                                 }
+                                catch (Exception ex)
+                                {
+                                    _logger?.LogError(ex, $"Device:[{Device.DeviceName}] Error after connection: {ex.Message}");
+                                }
+                            }
+                            else
+                            {
+                                _logger?.LogError($"Device:[{Device.DeviceName}] Failed to connect");
                             }
                         }
                     }
@@ -186,6 +198,7 @@ namespace Plugin
                 return;
             foreach (var item in variables.OrderBy(x => x.Index))
             {
+                _logger.LogInformation($"Reading variable: {item.Name}, Address: {item.DeviceAddress}");
                 var ret = new DriverReturnValueModel();
                 var ioarg = new DriverAddressIoArgModel
                 {
@@ -196,10 +209,15 @@ namespace Plugin
                 };
                 var method = Methods.Where(x => x.Name == item.Method).FirstOrDefault();
                 if (method == null)
+                {
                     ret.StatusType = VaribaleStatusTypeEnum.MethodError;
+                    _logger.LogError($"Method not found for variable: {item.Name}");
+                }
                 else
+                {
                     ret = (DriverReturnValueModel)method.Invoke(Driver,
                         new object[] { ioarg })!;
+                }
 
                 ret.Timestamp = DateTime.Now;
                 item.EnqueueVariable(ret.Value);
@@ -244,6 +262,15 @@ namespace Plugin
                 item.StatusType = ret.StatusType;
                 item.Timestamp = ret.Timestamp;
                 item.Message = ret.Message;
+
+                if (ret.StatusType == VaribaleStatusTypeEnum.Good)
+                {
+                    _logger.LogInformation($"Successfully read {item.Name}: Value={ret.Value}, Status=Good");
+                }
+                else
+                {
+                    _logger.LogWarning($"Failed to read {item.Name}: Status={ret.StatusType}");
+                }
 
                 //变化了才推送到mqttserver，用于前端展示
                 if (JsonConvert.SerializeObject(item.Values[1]) != JsonConvert.SerializeObject(item.Values[0]) || JsonConvert.SerializeObject(item.CookedValues[1]) != JsonConvert.SerializeObject(item.CookedValues[0]))
