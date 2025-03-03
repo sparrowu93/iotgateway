@@ -18,13 +18,15 @@ namespace WeightBalance
     [DriverInfo("WeightBalance", "V1.0.0", "Copyright IoTGateway 2024-12-26")]
     public class WeightBalanceDriver : IDriver
     {
-        private readonly ILogger _logger;
+
         private readonly string _device;
         private byte[] _latestData = Array.Empty<byte>();
         private bool _isConnected;
 
         private const string PRODUCT_TYPE_MPTA5000 = "MPTA-5000";
         private const string SERVICE_TEST_COMMAND = "START_TEST";
+
+        public ILogger _logger { get; set; }
 
         #region 配置参数
         [ConfigParameter("设备Id")]
@@ -41,6 +43,9 @@ namespace WeightBalance
 
         [ConfigParameter("超时时间ms")]
         public int Timeout { get; set; } = 3000;
+
+        [ConfigParameter("最小指令间隔ms")]
+        public uint MinPeriod { get; set; } = 3000;
 
         [ConfigParameter("命令重试次数")]
         public int CommandRetries { get; set; } = 3;

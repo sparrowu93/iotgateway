@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using PluginInterface;
 
@@ -22,13 +23,11 @@ namespace WebSocket.Client
         private Task? _heartbeatTask;
         private Task? _reconnectionTask;
         private JToken? _lastReceivedData;
+        private readonly StringBuilder _messageBuffer = new StringBuilder();
+
         public ILogger _logger { get; set; }
 
-        public string DeviceId { get; }
-        public string ServerUrl { get; set; } = "";
-        public int ReconnectInterval { get; set; } = 5000;
-        public int HeartbeatInterval { get; set; } = 30000;
-        public int ConnectionTimeout { get; set; } = 5000;
+
 
         public bool IsConnected
         {
@@ -44,17 +43,20 @@ namespace WebSocket.Client
         public uint MinPeriod { get; set; } = 1000;
         public int Timeout { get; set; } = 3000;
 
+        [ConfigParameter("设备ID")]
+        public string DeviceId { get; set; }
+
         [ConfigParameter("服务器地址")]
-        public string ServerUrlConfig { get; set; } = "ws://localhost:8080/ws";
+        public string ServerUrl { get; set; } = "ws://localhost:8080/ws";
 
         [ConfigParameter("自动重连间隔(ms)")]
-        public int ReconnectIntervalConfig { get; set; } = 5000;
+        public int ReconnectInterval { get; set; } = 5000;
 
         [ConfigParameter("心跳间隔(ms)")]
-        public int HeartbeatIntervalConfig { get; set; } = 30000;
+        public int HeartbeatInterval { get; set; } = 30000;
 
         [ConfigParameter("连接超时(ms)")]
-        public int ConnectionTimeoutConfig { get; set; } = 5000;
+        public int ConnectionTimeout { get; set; } = 5000;
 
         public DeviceWebSocketClient(string deviceId, ILogger logger)
         {
@@ -339,12 +341,30 @@ namespace WebSocket.Client
                             try
                             {
                                 var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                                _lastReceivedData = JToken.Parse(message);
-                                _logger.LogDebug("Received message: {Message}", message);
+                                _messageBuffer.Append(message);
+
+                                if (result.EndOfMessage)
+                                {
+                                    var completeMessage = _messageBuffer.ToString();
+                                    try
+                                    {
+                                        _lastReceivedData = JToken.Parse(completeMessage);
+                                        _logger.LogDebug("Received complete message: {Message}", completeMessage);
+                                    }
+                                    catch (JsonReaderException ex)
+                                    {
+                                        _logger.LogError(ex, "Error parsing JSON message: {Message}", completeMessage);
+                                    }
+                                    finally
+                                    {
+                                        _messageBuffer.Clear();
+                                    }
+                                }
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError(ex, "Error parsing received data");
+                                _logger.LogError(ex, "Error processing received data");
+                                _messageBuffer.Clear();
                             }
                         }
                     }

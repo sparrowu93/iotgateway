@@ -24,6 +24,7 @@ namespace DriverOpcUaClient
         private bool _keepRunning;
         private Task _monitoringTask;
         private CancellationTokenSource _cts;
+        private bool _isDisposed = false;
         
         public ILogger _logger { get; set; }
 
@@ -336,9 +337,17 @@ namespace DriverOpcUaClient
             _logger.LogInformation($"Device:[{_device}],Dispose()");
             try
             {
+                // Mark as disposed first to prevent new operations
+                _isDisposed = true;
+                
+                // Close the device
                 Close();
                 
+                // Clean up the CTS
                 _cts?.Dispose();
+                _cts = null;
+                
+                // Now we can safely dispose the lock
                 _lock?.Dispose();
             }
             catch (Exception ex)
@@ -352,9 +361,38 @@ namespace DriverOpcUaClient
         {
             var ret = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good };
             
+            // Check if already disposed before waiting on the lock
+            if (_isDisposed)
+            {
+                ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                ret.Message = "设备已被释放";
+                _logger.LogWarning($"Device:[{_device}],尝试在已释放的设备上读取");
+                return ret;
+            }
+            
+            bool lockAcquired = false;
+            
             try
             {
-                _lock.Wait();
+                // Try to acquire the lock with a timeout
+                lockAcquired = _lock.Wait(2000); // 2 second timeout
+                
+                if (!lockAcquired)
+                {
+                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                    ret.Message = "获取设备锁超时";
+                    _logger.LogWarning($"Device:[{_device}],获取设备锁超时");
+                    return ret;
+                }
+                
+                // Check again after acquiring the lock
+                if (_isDisposed)
+                {
+                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                    ret.Message = "设备已被释放";
+                    _logger.LogWarning($"Device:[{_device}],设备已被释放，无法读取");
+                    return ret;
+                }
                 
                 if (!IsConnected)
                 {
@@ -390,7 +428,19 @@ namespace DriverOpcUaClient
             }
             finally
             {
-                _lock.Release();
+                // Only release if we acquired the lock and the instance hasn't been disposed
+                if (lockAcquired && !_isDisposed)
+                {
+                    try
+                    {
+                        _lock.Release();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // This might happen in rare race conditions, just log it
+                        _logger.LogWarning($"Device:[{_device}],释放已处置的锁");
+                    }
+                }
             }
             
             return ret;
@@ -401,9 +451,38 @@ namespace DriverOpcUaClient
         {
             var ret = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good };
             
+            // Check if already disposed before waiting on the lock
+            if (_isDisposed)
+            {
+                ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                ret.Message = "设备已被释放";
+                _logger.LogWarning($"Device:[{_device}],尝试在已释放的设备上批量读取");
+                return ret;
+            }
+            
+            bool lockAcquired = false;
+            
             try
             {
-                _lock.Wait();
+                // Try to acquire the lock with a timeout
+                lockAcquired = _lock.Wait(2000); // 2 second timeout
+                
+                if (!lockAcquired)
+                {
+                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                    ret.Message = "获取设备锁超时";
+                    _logger.LogWarning($"Device:[{_device}],获取设备锁超时");
+                    return ret;
+                }
+                
+                // Check again after acquiring the lock
+                if (_isDisposed)
+                {
+                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                    ret.Message = "设备已被释放";
+                    _logger.LogWarning($"Device:[{_device}],设备已被释放，无法批量读取");
+                    return ret;
+                }
                 
                 if (!IsConnected)
                 {
@@ -492,7 +571,19 @@ namespace DriverOpcUaClient
             }
             finally
             {
-                _lock.Release();
+                // Only release if we acquired the lock and the instance hasn't been disposed
+                if (lockAcquired && !_isDisposed)
+                {
+                    try
+                    {
+                        _lock.Release();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // This might happen in rare race conditions, just log it
+                        _logger.LogWarning($"Device:[{_device}],释放已处置的锁");
+                    }
+                }
             }
             
             return ret;
@@ -503,9 +594,38 @@ namespace DriverOpcUaClient
         {
             var ret = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good };
             
+            // Check if already disposed before waiting on the lock
+            if (_isDisposed)
+            {
+                ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                ret.Message = "设备已被释放";
+                _logger.LogWarning($"Device:[{_device}],尝试在已释放的设备上浏览节点");
+                return ret;
+            }
+            
+            bool lockAcquired = false;
+            
             try
             {
-                _lock.Wait();
+                // Try to acquire the lock with a timeout
+                lockAcquired = _lock.Wait(2000); // 2 second timeout
+                
+                if (!lockAcquired)
+                {
+                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                    ret.Message = "获取设备锁超时";
+                    _logger.LogWarning($"Device:[{_device}],获取设备锁超时");
+                    return ret;
+                }
+                
+                // Check again after acquiring the lock
+                if (_isDisposed)
+                {
+                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                    ret.Message = "设备已被释放";
+                    _logger.LogWarning($"Device:[{_device}],设备已被释放，无法浏览节点");
+                    return ret;
+                }
                 
                 if (!IsConnected)
                 {
@@ -569,7 +689,19 @@ namespace DriverOpcUaClient
             }
             finally
             {
-                _lock.Release();
+                // Only release if we acquired the lock and the instance hasn't been disposed
+                if (lockAcquired && !_isDisposed)
+                {
+                    try
+                    {
+                        _lock.Release();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // This might happen in rare race conditions, just log it
+                        _logger.LogWarning($"Device:[{_device}],释放已处置的锁");
+                    }
+                }
             }
             
             return ret;
@@ -580,9 +712,35 @@ namespace DriverOpcUaClient
         {
             RpcResponse rpcResponse = new() { IsSuccess = false, Description = "正在处理写入请求" };
             
+            // Check if already disposed before waiting on the lock
+            if (_isDisposed)
+            {
+                rpcResponse.Description = "设备已被释放";
+                _logger.LogWarning($"Device:[{_device}],尝试在已释放的设备上写入");
+                return rpcResponse;
+            }
+            
+            bool lockAcquired = false;
+            
             try
             {
-                await _lock.WaitAsync();
+                // Try to acquire the lock with a timeout
+                lockAcquired = await _lock.WaitAsync(2000); // 2 second timeout
+                
+                if (!lockAcquired)
+                {
+                    rpcResponse.Description = "获取设备锁超时";
+                    _logger.LogWarning($"Device:[{_device}],获取设备锁超时");
+                    return rpcResponse;
+                }
+                
+                // Check again after acquiring the lock
+                if (_isDisposed)
+                {
+                    rpcResponse.Description = "设备已被释放";
+                    _logger.LogWarning($"Device:[{_device}],设备已被释放，无法写入");
+                    return rpcResponse;
+                }
                 
                 if (!IsConnected)
                 {
@@ -651,7 +809,19 @@ namespace DriverOpcUaClient
             }
             finally
             {
-                _lock.Release();
+                // Only release if we acquired the lock and the instance hasn't been disposed
+                if (lockAcquired && !_isDisposed)
+                {
+                    try
+                    {
+                        _lock.Release();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // This might happen in rare race conditions, just log it
+                        _logger.LogWarning($"Device:[{_device}],释放已处置的锁");
+                    }
+                }
             }
             
             return rpcResponse;

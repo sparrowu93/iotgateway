@@ -6,6 +6,11 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using PluginInterface;
 using HTTP.JsonClient.Models;
+using System.ComponentModel;
+using System.Text;
+using System.Threading;
+using System.Linq;
+using System.Collections.Generic;
 
 namespace HTTP.JsonClient
 {
@@ -13,68 +18,117 @@ namespace HTTP.JsonClient
     [DriverInfo("HTTP.JsonClient", "1.0.0", "HTTP JSON Client Driver")]
     public class HttpJsonClientDriver : IDriver, IAddressDefinitionProvider
     {
-        private readonly HttpClient _httpClient;
+        private HttpClient _httpClient;
         private bool _isConnected;
         private JObject _lastData;
         private DateTime _lastUpdateTime;
+        private readonly object _lock = new object();
+        private bool _isDisposed;
+        private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
+
+        #region 配置参数
 
         [ConfigParameter("DeviceId")]
         public string DeviceId { get; set; }
 
-        [ConfigParameter("BaseUrl")]
+        [ConfigParameter("主机地址")]
         public string BaseUrl { get; set; }
 
         [ConfigParameter("Path")]
         public string Path { get; set; }
 
-        [ConfigParameter("UpdateInterval")]
+        [ConfigParameter("更新间隔")]
         public int UpdateInterval { get; set; } = 1000; // Default 1 second
 
         [ConfigParameter("Timeout")]
         public int Timeout { get; set; } = 3000; // Default 3 seconds
 
-        [ConfigParameter("Headers")]
+        [ConfigParameter("Headers,k=v;k1=v1")]
         public string Headers { get; set; }
+
+        [ConfigParameter("查询参数,k=v;k1=v1")]
+        public string QueryParams { get; set; } = ""; // For URL query parameters
+
+        [ConfigParameter("请求体")]
+        public string Body { get; set; } = ""; // For request body content
+
+        [ConfigParameter("请求方法")]
+        public HttpMethod Method { get; set; } = HttpMethod.GET;
+
+        [ConfigParameter("内容类型")]
+        public ContentType ContentType { get; set; } = ContentType.Json;
+
+        #endregion
+
 
         public bool IsConnected => _isConnected;
         public uint MinPeriod => (uint)UpdateInterval;
         public ILogger _logger { get; set; }
 
-        public HttpJsonClientDriver()
+        public HttpJsonClientDriver(string device, ILogger logger)
         {
-            _httpClient = new HttpClient();
+            DeviceId = device;
             _isConnected = false;
             _lastData = null;
             _lastUpdateTime = DateTime.MinValue;
+            _logger = logger;
+            _isDisposed = false;
         }
 
         public bool Connect()
         {
             try
             {
-                _httpClient.BaseAddress = new Uri(BaseUrl);
-                _httpClient.Timeout = TimeSpan.FromMilliseconds(Timeout);
+                if (_isDisposed) return false;
                 
-                // Add headers if specified
-                if (!string.IsNullOrEmpty(Headers))
+                // Use a timeout for semaphore to prevent deadlocks
+                if (!_semaphore.Wait(TimeSpan.FromSeconds(5)))
                 {
-                    try
+                    _logger?.LogError("Timeout waiting for semaphore lock during Connect");
+                    return false;
+                }
+                
+                try
+                {
+                    if (_isDisposed) return false;
+                    
+                    // Dispose old client and create a new one
+                    if (_httpClient != null)
                     {
-                        var headerDict = JsonConvert.DeserializeObject<Dictionary<string, string>>(Headers);
-                        foreach (var header in headerDict)
+                        _httpClient.Dispose();
+                    }
+                    
+                    // Create a new HttpClient instance
+                    _httpClient = new HttpClient();
+                    _httpClient.BaseAddress = new Uri(BaseUrl);
+                    _httpClient.Timeout = TimeSpan.FromMilliseconds(Timeout);
+                    
+                    // Add headers if specified
+                    if (!string.IsNullOrEmpty(Headers))
+                    {
+                        try
                         {
-                            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation(header.Key, header.Value);
+                            var headerDict = JsonConvert.DeserializeObject<Dictionary<string, string>>(Headers);
+                            foreach (var header in headerDict)
+                            {
+                                _httpClient.DefaultRequestHeaders.TryAddWithoutValidation(header.Key, header.Value);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogError(ex, "Failed to parse headers JSON");
+                            return false;
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        _logger?.LogError(ex, "Failed to parse headers JSON");
-                        return false;
-                    }
-                }
 
-                _isConnected = true;
-                return true;
+                    _isConnected = true;
+                    return true;
+                }
+                finally
+                {
+                    try { _semaphore.Release(); } 
+                    catch (ObjectDisposedException) { /* Ignore if already disposed */ }
+                }
             }
             catch (Exception ex)
             {
@@ -88,8 +142,25 @@ namespace HTTP.JsonClient
         {
             try
             {
-                _isConnected = false;
-                return true;
+                if (_isDisposed) return false;
+                
+                if (!_semaphore.Wait(TimeSpan.FromSeconds(5)))
+                {
+                    _logger?.LogError("Timeout waiting for semaphore lock during Close");
+                    return false;
+                }
+                
+                try
+                {
+                    if (_isDisposed) return false;
+                    _isConnected = false;
+                    return true;
+                }
+                finally
+                {
+                    try { _semaphore.Release(); } 
+                    catch (ObjectDisposedException) { /* Ignore if already disposed */ }
+                }
             }
             catch (Exception ex)
             {
@@ -100,7 +171,29 @@ namespace HTTP.JsonClient
 
         public void Dispose()
         {
-            _httpClient?.Dispose();
+            if (_isDisposed) return;
+            
+            // Use a timeout to prevent deadlock
+            if (!_semaphore.Wait(TimeSpan.FromSeconds(5)))
+            {
+                _logger?.LogError("Timeout waiting for semaphore lock during Dispose");
+                return;
+            }
+            
+            try
+            {
+                if (_isDisposed) return;
+                _isDisposed = true;
+                
+                _httpClient?.Dispose();
+                _httpClient = null;
+                _semaphore.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error during dispose");
+            }
+            
             GC.SuppressFinalize(this);
         }
 
@@ -108,22 +201,159 @@ namespace HTTP.JsonClient
         {
             try
             {
-                if ((DateTime.Now - _lastUpdateTime).TotalMilliseconds < UpdateInterval)
+                if (_isDisposed) return;
+                
+                // Wait for semaphore with timeout to prevent deadlocks
+                if (!await _semaphore.WaitAsync(TimeSpan.FromSeconds(5)))
                 {
+                    _logger?.LogError("Timeout waiting for semaphore lock during UpdateDataAsync");
                     return;
                 }
+                
+                try
+                {
+                    if (_isDisposed) return;
+                    
+                    // Check if update is needed
+                    if ((DateTime.Now - _lastUpdateTime).TotalMilliseconds < UpdateInterval)
+                    {
+                        return;
+                    }
 
-                var response = await _httpClient.GetAsync(Path);
-                response.EnsureSuccessStatusCode();
-                var jsonString = await response.Content.ReadAsStringAsync();
-                _lastData = JObject.Parse(jsonString);
-                _lastUpdateTime = DateTime.Now;
+                    // Check if client is available
+                    if (_httpClient == null)
+                    {
+                        _logger?.LogError("HttpClient is null, attempting to reconnect");
+                        if (!Connect())
+                        {
+                            return;
+                        }
+                    }
+
+                    // Build the URL
+                    string url = Path;
+                    if (!string.IsNullOrEmpty(url))
+                    {
+                        if (!url.StartsWith("/"))
+                            url = "/" + url;
+                    }
+
+                    // Add query parameters if provided
+                    if (!string.IsNullOrEmpty(QueryParams))
+                    {
+                        string[] pairs = QueryParams.Split(';');
+                        url = url + (url.Contains("?") ? "&" : "?") + string.Join("&", pairs);
+                    }
+
+                    // Create the request message
+                    var requestMessage = new System.Net.Http.HttpRequestMessage
+                    {
+                        Method = new System.Net.Http.HttpMethod(Method.ToString()),
+                        RequestUri = new Uri(url, UriKind.Relative)
+                    };
+
+                    // Add headers if provided
+                    if (!string.IsNullOrEmpty(Headers))
+                    {
+                        try
+                        {
+                            var headers = Headers.Split(';')
+                                .Select(pair => pair.Split('='))
+                                .Where(parts => parts.Length == 2)
+                                .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim());
+                            foreach (var header in headers)
+                            {
+                                requestMessage.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogError($"Error parsing headers: {ex.Message}");
+                        }
+                    }
+
+                    // Add body content for non-GET requests
+                    if (Method != HttpMethod.GET && !string.IsNullOrEmpty(Body))
+                    {
+                        HttpContent content = null;
+                        
+                        switch (ContentType)
+                        {
+                            case ContentType.Form:
+                            case ContentType.FormUrlEncoded:
+                                try {
+                                    var formData = JsonConvert.DeserializeObject<Dictionary<string, string>>(Body);
+                                    content = new FormUrlEncodedContent(formData);
+                                }
+                                catch (Exception ex) {
+                                    _logger?.LogError($"Error parsing form data: {ex.Message}");
+                                }
+                                break;
+                            
+                            case ContentType.Json:
+                                content = new StringContent(Body, Encoding.UTF8, "application/json");
+                                break;
+                            
+                            case ContentType.Xml:
+                                content = new StringContent(Body, Encoding.UTF8, "application/xml");
+                                break;
+                            
+                            case ContentType.Raw:
+                            default:
+                                content = new StringContent(Body);
+                                break;
+                        }
+
+                        if (content != null)
+                        {
+                            requestMessage.Content = content;
+                        }
+                    }
+
+                    // Set timeout
+                    var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromMilliseconds(Timeout));
+
+                    try
+                    {
+                        // Execute request
+                        HttpResponseMessage response = await _httpClient.SendAsync(requestMessage, cancellationTokenSource.Token);
+                        response.EnsureSuccessStatusCode();
+
+                        // Process response
+                        string jsonResponse = await response.Content.ReadAsStringAsync();
+                        _lastData = JObject.Parse(jsonResponse);
+                        _lastUpdateTime = DateTime.Now;
+                        _isConnected = true;
+                    }
+                    catch (HttpRequestException ex)
+                    {
+                        _isConnected = false;
+                        _logger?.LogError($"HTTP request failed: {ex.Message}");
+                        _httpClient.Dispose();
+                        _httpClient = null;
+                        // Reconnect on next attempt - the client itself doesn't need recreation
+                    }
+                    catch (TaskCanceledException ex)
+                    {
+                        _isConnected = false;
+                        _logger?.LogError($"HTTP request timed out: {ex.Message}");
+                    }
+                    catch (Exception ex)
+                    {
+                        _isConnected = false;
+                        _logger?.LogError($"Error in HTTP request: {ex.Message}");
+                    }
+                }
+                finally
+                {
+                    try { _semaphore.Release(); }
+                    catch (ObjectDisposedException) { /* Ignore if already disposed */ }
+                }
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Error updating data from HTTP endpoint");
                 _isConnected = false;
-                throw;
+                _logger?.LogError($"Error updating data: {ex.Message}");
             }
         }
 
@@ -132,6 +362,15 @@ namespace HTTP.JsonClient
         {
             try
             {
+                if (_isDisposed)
+                {
+                    return new DriverReturnValueModel
+                    {
+                        Value = null,
+                        StatusType = VaribaleStatusTypeEnum.Bad
+                    };
+                }
+                
                 UpdateDataAsync().Wait();
 
                 if (_lastData == null)
@@ -190,7 +429,7 @@ namespace HTTP.JsonClient
                         value = token.Value<string>();
                         break;
                     default:
-                        value = token.ToObject<object>();
+                        value = token.ToString();
                         break;
                 }
 
