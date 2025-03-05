@@ -24,8 +24,14 @@ public class FileParserDriver : IDriver
 
     public bool IsConnected { get; private set; }
     public ILogger _logger { get; set; }
+    
+    [ConfigParameter("设备ID")]
     public string DeviceId { get; set; }
+
+    [ConfigParameter("超时时间")]
     public int Timeout { get; set; } = 3000;
+
+    [ConfigParameter("最小通讯周期")]
     public uint MinPeriod { get; set; } = 3000;
 
     public FileParserDriver(ILogger logger, string deviceId)
