@@ -218,6 +218,44 @@ namespace Plugin
             return driverFilesComboSelect;
         }
 
+
+        public IDriver GetDriver(Guid? deviceId)
+        {
+            if (!deviceId.HasValue)
+                return null;
+
+            try
+            {
+                _logger.LogInformation($"GetDriver Start:{deviceId}");
+                using var dc = new DataContext(_connnectSetting, _dbType);
+                var device = dc.Set<Device>().Include(x => x.Driver).FirstOrDefault(x => x.ID == deviceId);
+                if (device?.Driver == null)
+                    return null;
+
+                var driver = DriverManager.DriverInfos
+                    .SingleOrDefault(x => x.Type.FullName == device.Driver.AssembleName);
+                if (driver == null)
+                {
+                    _logger.LogError($"找不到设备:[{device.DeviceName}]的驱动:[{device.Driver.AssembleName}]");
+                    return null;
+                }
+
+                Type[] types = new Type[] { typeof(string), typeof(ILogger) };
+                object[] param = new object[] { device.DeviceName, _logger };
+
+                ConstructorInfo? constructor = driver.Type.GetConstructor(types);
+                var deviceObj = constructor?.Invoke(param) as IDriver;
+                _logger.LogInformation($"GetDriver End:{deviceId}");
+                return deviceObj;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"GetDriver Error:{deviceId}", ex);
+                return null;
+            }
+        }
+
+
         public void Dispose()
         {
             _logger.LogInformation("Dispose");

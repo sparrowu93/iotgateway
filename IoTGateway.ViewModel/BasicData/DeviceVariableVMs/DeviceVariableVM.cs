@@ -41,7 +41,8 @@ namespace IoTGateway.ViewModel.BasicData.DeviceVariableVMs
             if (Entity.DeviceId != null)
             {
                 AllMethods = deviceService.GetDriverMethods(Entity.DeviceId);
-                if (AllMethods is IAddressDefinitionProvider addressProvider)
+                var driver = deviceService.GetDriver(Entity.DeviceId);
+                if (driver is IAddressDefinitionProvider addressProvider)
                 {
                     AddressDefinitions = addressProvider.GetAddressDefinitions();
                 }
@@ -50,7 +51,8 @@ namespace IoTGateway.ViewModel.BasicData.DeviceVariableVMs
             {
                 Entity.DeviceId = IoTBackgroundService.VariableSelectDeviceId;
                 AllMethods = deviceService.GetDriverMethods(Entity.DeviceId);
-                if (AllMethods is IAddressDefinitionProvider addressProvider)
+                var driver = deviceService.GetDriver(Entity.DeviceId);
+                if (driver is IAddressDefinitionProvider addressProvider)
                 {
                     AddressDefinitions = addressProvider.GetAddressDefinitions();
                 }
