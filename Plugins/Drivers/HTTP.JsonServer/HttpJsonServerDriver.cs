@@ -609,27 +609,11 @@ namespace Plugin.Drivers.HTTPServer
                             _logger?.LogInformation($"Received request to {RobotEndpoint} with body: {requestBody.Substring(0, Math.Min(200, requestBody.Length))}...");
                             
                             // 尝试从data对象中获取数据
-                            JObject parsedObject;
-                            if (requestBody.Contains("\"data\":"))
-                            {
-                                var wrapper = JObject.Parse(requestBody);
-                                if (wrapper["data"] != null)
-                                {
-                                    parsedObject = wrapper["data"] as JObject;
-                                    _logger?.LogInformation("Found data object in JSON");
-                                }
-                                else
-                                {
-                                    parsedObject = JObject.Parse(requestBody);
-                                }
-                            }
-                            else
-                            {
-                                parsedObject = JObject.Parse(requestBody);
-                            }
+                            JObject parsedObject = JObject.Parse(requestBody);
                             
-                            if (parsedObject != null)
+                            if (parsedObject != null && parsedObject.ContainsKey("data"))
                             {
+                                parsedObject = parsedObject["data"] as JObject;
                                 if (parsedObject.ContainsKey("endEffectorStatus")) 
                                 {
                                     _logger?.LogInformation("Processing as robot action");
@@ -647,7 +631,7 @@ namespace Plugin.Drivers.HTTPServer
                                 }
                                 else 
                                 {
-                                    _logger?.LogWarning($"Received data doesn't match expected format: {requestBody.Substring(0, Math.Min(200, requestBody.Length))}...");
+                                    _logger?.LogWarning($"Received data doesn't match expected format: {requestBody}");
                                 }
                             }
                             else
