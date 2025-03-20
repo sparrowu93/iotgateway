@@ -2,7 +2,7 @@
 @inject IStringLocalizer<Program> Localizer;
 
 <wt:form vm="@Model">
-     <wt:row items-per-row="ItemsPerRowEnum.Two">
+    <wt:row items-per-row="ItemsPerRowEnum.Two">
         <wt:combobox field="Entity.DeviceId" items="AllDevices" />
         <wt:textbox field="Entity.Name" />
         <wt:textbox field="Entity.Index" />
@@ -28,6 +28,7 @@
         </wt:quote>
     }
     <wt:quote>表达式可以进行简单的数学计算,其中raw为原值参与计算</wt:quote>
+    <wt:hidden field="Entity.ID" />
     <wt:row align="AlignEnum.Right">
         <wt:submitbutton />
         <wt:closebutton />

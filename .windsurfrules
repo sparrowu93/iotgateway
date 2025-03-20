@@ -9,9 +9,5 @@ Also update the progress of the task in the Scratchpad when you finish a subtask
 Especially when you finished a milestone, it will help to improve your depth of task accomplishment to use the scratchpad to reflect and plan.
 The goal is to help you maintain a big picture as well as the progress of the task. Always refer to the Scratchpad when you plan the next step.
 
-## User Specified Lessons
-1. 本项目是使用 .Net6.0 框架的物联网采集网关项目, 支持通过编译驱动，添加驱动，在添加设备阶段绑定驱动，通过修改设备连接参数连接采集目标，通过指定采集变量解析采集内容并分发上报的功能。
-2. IoTgateway 为项目核心模块，提供基础设备管理、通信管理、数据上报、规则管理等功能。
-3. IoTgateway/Areas/Views 为项目后台页面功能模块， 提供设备管理(Device),设备连接参数管理（DeviceConfig）,设备采集变量管理（DeviceVariable）。
-4. Plugins 为项目扩展模块, 提供驱动接口，用于添加新的驱动，驱动由插件提供。
-5. Plugins/Drivers 为驱动具体实现模块， 用于定义驱动的具体实现。
+1. 在进行代码修改之前，参考 `Reminder.md` 中的项目功能大纲作为功能基础
+2. 在功能修改完成后，更新 `Reminder.md` 并在最下方添加 `changelog` 注明修改部分和功能实现思路。
