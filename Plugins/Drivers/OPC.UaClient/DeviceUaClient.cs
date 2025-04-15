@@ -223,7 +223,7 @@ namespace DriverOpcUaClient
             }
         }
         
-        private void Session_KeepAlive(Session session, KeepAliveEventArgs e)
+        private void Session_KeepAlive(object sender, KeepAliveEventArgs e)
         {
             try
             {
@@ -244,14 +244,15 @@ namespace DriverOpcUaClient
                 _logger.LogError($"Device:[{_device}],保活处理错误: {ex.Message}");
             }
         }
-        
+
+        // When reconnecting
         private void Session_Reconnected(object sender, EventArgs e)
         {
             try
             {
                 if (_reconnectHandler != null)
                 {
-                    _session = _reconnectHandler.Session;
+                    _session = (Session)_reconnectHandler.Session; // Ensure safe casting
                     _reconnectHandler.Dispose();
                     _reconnectHandler = null;
                     _logger.LogInformation($"Device:[{_device}],已重新连接到 {ServerUrl}");

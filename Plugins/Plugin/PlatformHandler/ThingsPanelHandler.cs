@@ -12,12 +12,12 @@ namespace Plugin.PlatformHandler
     public class ThingsPanelHandler : IPlatformHandler
     {
         public IManagedMqttClient MqttClient { get; }
-        public ILogger<MessageService> Logger { get; }
+        public ILogger<MyMqttClient> Logger { get; }
 
         public event EventHandler<RpcRequest> OnExcRpc;
         private readonly DateTime _tsStartDt = new(1970, 1, 1);
 
-        public ThingsPanelHandler(IManagedMqttClient mqttClient, ILogger<MessageService> logger, EventHandler<RpcRequest> onExcRpc)
+        public ThingsPanelHandler(IManagedMqttClient mqttClient, ILogger<MyMqttClient> logger, EventHandler<RpcRequest> onExcRpc)
         {
             MqttClient = mqttClient;
             Logger = logger;
@@ -42,6 +42,7 @@ namespace Plugin.PlatformHandler
         {
             foreach (var payload in sendModel[deviceName])
             {
+                Logger.LogInformation($"PublishTelemetryAsync Topic:{{Topic}},Payload:{JsonConvert.SerializeObject(payload)}");
                 if (payload.Values != null)
                 {
                     var telemetryData = new Dictionary<string, Dictionary<string, object>>()
@@ -54,8 +55,10 @@ namespace Plugin.PlatformHandler
                         }
 
                     };
+                    Logger.LogInformation($"PublishTelemetryAsync Topic:{"gateway/telemetry"},Payload:{JsonConvert.SerializeObject(telemetryData)}");
                     await MqttClient.EnqueueAsync(new MqttApplicationMessageBuilder().WithTopic($"gateway/telemetry")
                         .WithPayload(JsonConvert.SerializeObject(telemetryData)).Build());
+                    
                 }
             }
         }

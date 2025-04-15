@@ -15,10 +15,10 @@ namespace Plugin.PlatformHandler
         private readonly string _tbRpcTopic = "v1/gateway/rpc";
 
         public IManagedMqttClient MqttClient { get; }
-        public ILogger<MessageService> Logger { get; }
+        public ILogger<MyMqttClient> Logger { get; }
         public event EventHandler<RpcRequest> OnExcRpc;
 
-        public ThingsBoardHandler(IManagedMqttClient mqttClient, ILogger<MessageService> logger, EventHandler<RpcRequest> onExcRpc)
+        public ThingsBoardHandler(IManagedMqttClient mqttClient, ILogger<MyMqttClient> logger, EventHandler<RpcRequest> onExcRpc)
         {
             MqttClient = mqttClient;
             Logger = logger;

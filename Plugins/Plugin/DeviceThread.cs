@@ -1,4 +1,4 @@
-using PluginInterface;
+﻿using PluginInterface;
 using System.Reflection;
 using System.Text;
 using IoTGateway.DataAccess;
@@ -18,7 +18,7 @@ namespace Plugin
         public readonly Device Device;
         public readonly IDriver Driver;
         private readonly string _projectId;
-        private readonly MessageService _messageService;
+        private readonly MyMqttClient? _myMqttClient;
         private Interpreter? _interpreter;
         internal List<MethodInfo>? Methods { get; set; }
         private Task? _task;
@@ -26,11 +26,11 @@ namespace Plugin
         private readonly CancellationTokenSource _tokenSource = new CancellationTokenSource();
         private ManualResetEvent resetEvent = new(true);
 
-        public DeviceThread(Device device, IDriver driver, string projectId, MessageService messageService,
+        public DeviceThread(Device device, IDriver driver, string projectId, MyMqttClient myMqttClient,
             MqttServer mqttServer, ILogger logger)
         {
-            _messageService = messageService;
-            _messageService.OnExcRpc += MyMqttClient_OnExcRpc;
+            _myMqttClient = myMqttClient;
+            _myMqttClient.OnExcRpc += MyMqttClient_OnExcRpc;
             Device = device;
             Driver = driver;
             _projectId = projectId;
@@ -64,7 +64,7 @@ namespace Plugin
                 //上传客户端属性
                 foreach (var deviceVariables in Device.DeviceVariables!.GroupBy(x => x.Alias))
                 {
-                    _messageService.UploadAttributeAsync(string.IsNullOrWhiteSpace(deviceVariables.Key)
+                    _myMqttClient.UploadAttributeAsync(string.IsNullOrWhiteSpace(deviceVariables.Key)
                             ? Device.DeviceName
                     : deviceVariables.Key,
                         Device.DeviceConfigs.Where(x => x.DataSide == DataSide.ClientSide || x.DataSide == DataSide.AnySide)
@@ -101,18 +101,19 @@ namespace Plugin
                                     var triggerVariables = deviceVariables.Where(x => x.IsTrigger).ToList();
                                     ReadVariables(ref triggerVariables, ref payLoadTrigger, _mqttServer);
 
-                                    var triggerValues = triggerVariables.ToDictionary(x => x.Name, x => x.CookedValue);
+                                    var triggerValues = triggerVariables.ToDictionary(x=>x.Name,x=>x.CookedValue);
 
 
                                     var payLoadUnTrigger = new PayLoad() { Values = new() };
                                     //有需要上传 或者全部是非触发
+                                    _logger.LogInformation($"{Device.DeviceName} triggerValues:{JsonConvert.SerializeObject(triggerValues)} isany {triggerValues.Values.Any(x => x is true)} {!triggerVariables.Any()}");
                                     if (triggerValues.Values.Any(x => x is true) || !triggerVariables.Any())
                                     {
                                         var variables = deviceVariables.Where(x => !triggerVariables.Select(y => y.ID).Contains(x.ID)).ToList();
                                         ReadVariables(ref variables, ref payLoadUnTrigger, _mqttServer);
                                         canPub = true;
                                     }
-
+                                    _logger.LogInformation($"{Device.DeviceName} canPub:{canPub}");
 
                                     if (canPub)
                                     {
@@ -126,13 +127,13 @@ namespace Plugin
                                         payLoad.TS = (long)(DateTime.UtcNow - _tsStartDt).TotalMilliseconds;
                                         payLoad.DeviceStatus = DeviceStatusTypeEnum.Good;
                                         sendModel[deviceName] = new List<PayLoad> { payLoad };
-                                        _messageService
+                                        _myMqttClient
                                             .PublishTelemetryAsync(deviceName,
                                                 Device, sendModel).Wait();
                                     }
-
+                                    
                                     if (deviceVariables.Any(x => x.StatusType == VaribaleStatusTypeEnum.Bad))
-                                        _messageService?.DeviceDisconnected(deviceName, Device);
+                                        _myMqttClient?.DeviceDisconnected(deviceName, Device);
                                 }
 
                             }
@@ -153,31 +154,19 @@ namespace Plugin
                                     ? Device.DeviceName
                                     : deviceVariables.Key;
 
-                                _messageService?.DeviceDisconnected(deviceName, Device);
+                                _myMqttClient?.DeviceDisconnected(deviceName, Device);
                             }
 
                             if (Driver.Connect())
                             {
-                                try 
+                                foreach (var deviceVariables in Device.DeviceVariables!.GroupBy(x => x.Alias))
                                 {
-                                    foreach (var deviceVariables in Device.DeviceVariables!.GroupBy(x => x.Alias))
-                                    {
-                                        string deviceName = string.IsNullOrWhiteSpace(deviceVariables.Key)
-                                            ? Device.DeviceName
-                                            : deviceVariables.Key;
+                                    string deviceName = string.IsNullOrWhiteSpace(deviceVariables.Key)
+                                        ? Device.DeviceName
+                                        : deviceVariables.Key;
 
-                                        _messageService?.DeviceConnected(deviceName, Device);
-                                        _logger?.LogInformation($"Device:[{deviceName}] Connected successfully, attempting to read variables");
-                                    }
+                                    _myMqttClient?.DeviceConnected(deviceName, Device);
                                 }
-                                catch (Exception ex)
-                                {
-                                    _logger?.LogError(ex, $"Device:[{Device.DeviceName}] Error after connection: {ex.Message}");
-                                }
-                            }
-                            else
-                            {
-                                _logger?.LogError($"Device:[{Device.DeviceName}] Failed to connect");
                             }
                         }
                     }
@@ -198,26 +187,19 @@ namespace Plugin
                 return;
             foreach (var item in variables.OrderBy(x => x.Index))
             {
-                _logger.LogInformation($"Reading variable: {item.Name}, Address: {item.DeviceAddress}");
                 var ret = new DriverReturnValueModel();
                 var ioarg = new DriverAddressIoArgModel
                 {
                     ID = item.ID,
                     Address = item.DeviceAddress,
-                    ValueType = item.DataType,
-                    EndianType = item.EndianType
+                    ValueType = item.DataType
                 };
                 var method = Methods.Where(x => x.Name == item.Method).FirstOrDefault();
                 if (method == null)
-                {
                     ret.StatusType = VaribaleStatusTypeEnum.MethodError;
-                    _logger.LogError($"Method not found for variable: {item.Name}");
-                }
                 else
-                {
                     ret = (DriverReturnValueModel)method.Invoke(Driver,
                         new object[] { ioarg })!;
-                }
 
                 ret.Timestamp = DateTime.Now;
                 item.EnqueueVariable(ret.Value);
@@ -263,17 +245,8 @@ namespace Plugin
                 item.Timestamp = ret.Timestamp;
                 item.Message = ret.Message;
 
-                if (ret.StatusType == VaribaleStatusTypeEnum.Good)
-                {
-                    _logger.LogInformation($"Successfully read {item.Name}: Value={ret.Value}, Status=Good");
-                }
-                else
-                {
-                    _logger.LogWarning($"Failed to read {item.Name}: Status={ret.StatusType}");
-                }
-
                 //变化了才推送到mqttserver，用于前端展示
-                if (JsonConvert.SerializeObject(item.Values[1]) != JsonConvert.SerializeObject(item.Values[0]) || JsonConvert.SerializeObject(item.CookedValues[1]) != JsonConvert.SerializeObject(item.CookedValues[0]))
+                if (JsonConvert.SerializeObject(item.Values[1]) != JsonConvert.SerializeObject(item.Values[0])|| JsonConvert.SerializeObject(item.CookedValues[1]) != JsonConvert.SerializeObject(item.CookedValues[0]))
                 {
                     var msgInternal = new InjectedMqttApplicationMessage(
                         new MqttApplicationMessage()
@@ -285,7 +258,7 @@ namespace Plugin
                         });
                     mqttServer.InjectApplicationMessage(msgInternal);
                 }
-
+                
                 Thread.Sleep((int)Device.CmdPeriod);
             }
         }
@@ -328,7 +301,7 @@ namespace Plugin
                             DeviceVariable? deviceVariable;
                             if (e.DeviceName == Device.DeviceName)
                                 deviceVariable = Device.DeviceVariables.FirstOrDefault(x =>
-                                    x.Name == para.Key);
+                                    x.Name == para.Key && string.IsNullOrWhiteSpace(x.Alias));
                             else
                                 deviceVariable = Device.DeviceVariables.FirstOrDefault(x =>
                                     x.Name == para.Key && x.Alias == e.DeviceName);
@@ -375,7 +348,7 @@ namespace Plugin
                 }
 
                 //反馈RPC
-                _messageService.ResponseRpcAsync(rpcResponse).Wait();
+                _myMqttClient.ResponseRpcAsync(rpcResponse).Wait();
                 //纪录入库
                 rpcLog.IsSuccess = rpcResponse.IsSuccess;
                 rpcLog.Description = rpcResponse.Description;
@@ -398,12 +371,12 @@ namespace Plugin
                     string deviceName = string.IsNullOrWhiteSpace(deviceVariables.Key)
                         ? Device.DeviceName
                         : deviceVariables.Key;
-                    _messageService?.DeviceDisconnected(deviceName, Device);
+                    _myMqttClient?.DeviceDisconnected(deviceName, Device);
                 }
             }
 
             if (_task == null) return;
-            if (_messageService != null) _messageService.OnExcRpc -= MyMqttClient_OnExcRpc;
+            if (_myMqttClient != null) _myMqttClient.OnExcRpc -= MyMqttClient_OnExcRpc;
             _tokenSource.Cancel();
             Driver.Close();
         }

@@ -7,7 +7,7 @@ namespace Plugin.PlatformHandler
 {
     public static class PlatformHandlerFactory
     {
-        public static IPlatformHandler CreateHandler(IoTPlatformType platform, IManagedMqttClient mqttClient, ILogger<MessageService> logger, EventHandler<RpcRequest> onExcRpc)
+        public static IPlatformHandler CreateHandler(IoTPlatformType platform, IManagedMqttClient mqttClient, ILogger<MyMqttClient> logger, EventHandler<RpcRequest> onExcRpc)
         {
             switch (platform)
             {

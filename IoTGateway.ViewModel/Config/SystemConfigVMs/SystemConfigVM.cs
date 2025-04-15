@@ -29,7 +29,7 @@ namespace IoTGateway.ViewModel.Config.SystemConfigVMs
         public override void DoEdit(bool updateAllFields = false)
         {
             base.DoEdit(updateAllFields);
-            var messageService = Wtm.ServiceProvider.GetService(typeof(MessageService)) as MessageService;
+            var messageService = Wtm.ServiceProvider.GetService(typeof(MyMqttClient)) as MyMqttClient;
             messageService.StartClientAsync().Wait();
         }
 

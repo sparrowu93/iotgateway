@@ -13,12 +13,12 @@ namespace Plugin.PlatformHandler
     public class IoTSharpHandler : IPlatformHandler
     {
         public IManagedMqttClient MqttClient { get; }
-        public ILogger<MessageService> Logger { get; }
+        public ILogger<MyMqttClient> Logger { get; }
 
         public event EventHandler<RpcRequest> OnExcRpc;
         private readonly DateTime _tsStartDt = new(1970, 1, 1);
 
-        public IoTSharpHandler(IManagedMqttClient mqttClient, ILogger<MessageService> logger, EventHandler<RpcRequest> onExcRpc)
+        public IoTSharpHandler(IManagedMqttClient mqttClient, ILogger<MyMqttClient> logger, EventHandler<RpcRequest> onExcRpc)
         {
             MqttClient = mqttClient;
             Logger = logger;

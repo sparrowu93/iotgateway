@@ -74,7 +74,7 @@ namespace IoTGateway
             services.AddHostedService<IoTBackgroundService>();
             services.AddSingleton<DeviceService>();
             services.AddSingleton<DriverService>();
-            services.AddSingleton<MessageService>();
+            services.AddSingleton<MyMqttClient>();
             services.AddSingleton<ModbusSlaveService>();
         }
 

@@ -97,11 +97,11 @@ namespace IoTGateway.ViewModel.BasicData
 
                 transaction.Commit();
 
-                var messageService = Wtm.ServiceProvider.GetService(typeof(MessageService)) as MessageService;
+                var messageService = Wtm.ServiceProvider.GetService(typeof(MyMqttClient)) as MyMqttClient;
                 messageService.StartClientAsync().Wait();
 
                 //重新启动采集
-                deviceService.CreateDeviceThreads();
+                deviceService.CreateDeviceThreads(devices);
 
                 导入结果 =
                     $"成功导入{devices.Count(x => x.DeviceTypeEnum == DeviceTypeEnum.Device)}个设备，{devices.Count(x => x.DeviceTypeEnum == DeviceTypeEnum.Group)}个组";

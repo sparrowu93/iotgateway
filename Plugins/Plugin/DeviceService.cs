@@ -17,26 +17,21 @@ namespace Plugin
         public DriverService DriverManager;
 
         public List<DeviceThread> DeviceThreads = new List<DeviceThread>();
-        private readonly MessageService _messageService;
+        private readonly MyMqttClient _myMqttClient;
+        // private readonly UAService _uAService;
         private readonly MqttServer _mqttServer;
         private readonly string _connnectSetting = IoTBackgroundService.connnectSetting;
         private readonly DBTypeEnum _dbType = IoTBackgroundService.DbType;
 
         //UAService? uAService, 
-        public DeviceService(IConfiguration configRoot, DriverService driverManager, MessageService messageService,
+        public DeviceService(IConfiguration configRoot, DriverService driverManager, MyMqttClient myMqttClient,
             MqttServer mqttServer, ILogger<DeviceService> logger)
         {
             _logger = logger;
             DriverManager = driverManager;
-            _messageService = messageService;
+            _myMqttClient = myMqttClient;
             //_uAService = uAService;
             _mqttServer = mqttServer ?? throw new ArgumentNullException(nameof(mqttServer));
-
-            CreateDeviceThreads();
-        }
-
-        public void CreateDeviceThreads()
-        {
             try
             {
                 using (var dc = new DataContext(_connnectSetting, _dbType))
@@ -87,9 +82,9 @@ namespace Plugin
                 {
                     var systemManage = dc.Set<SystemConfig>().FirstOrDefault();
                     var driver = DriverManager.DriverInfos
-                        .SingleOrDefault(x => x.Type.FullName == device.Driver?.AssembleName);
+                        .SingleOrDefault(x => x.Type.FullName == device.Driver.AssembleName);
                     if (driver == null)
-                        _logger.LogError($"找不到设备:[{device.DeviceName}]的驱动:[{device.Driver?.AssembleName}]");
+                        _logger.LogError($"找不到设备:[{device.DeviceName}]的驱动:[{device.Driver.AssembleName}]");
                     else
                     {
                         var settings = dc.Set<DeviceConfig>().Where(x => x.DeviceId == device.ID).AsNoTracking()
@@ -151,7 +146,7 @@ namespace Plugin
                         if (deviceObj != null && systemManage != null)
                         {
                             var deviceThread = new DeviceThread(device, deviceObj, systemManage.GatewayName,
-                                _messageService,
+                                _myMqttClient,
                                 _mqttServer, _logger);
                             DeviceThreads.Add(deviceThread);
                         }

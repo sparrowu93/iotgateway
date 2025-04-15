@@ -9,7 +9,7 @@ namespace Plugin.PlatformHandler
     public interface IPlatformHandler
     {
         IManagedMqttClient MqttClient { get; }
-        ILogger<MessageService> Logger { get; }
+        ILogger<MyMqttClient> Logger { get; }
 
         public event EventHandler<RpcRequest> OnExcRpc;
 
