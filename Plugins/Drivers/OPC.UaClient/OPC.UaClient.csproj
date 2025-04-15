@@ -18,7 +18,7 @@
     <LangVersion>Default</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.4.370.12" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.4.371.96" />
   </ItemGroup>
 
   <ItemGroup>
