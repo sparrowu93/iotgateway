@@ -9,22 +9,33 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using System.IO;
 
 namespace TCP.JAKA
 {
     public class JAKADriver : IDriver
     {
-        private TcpClient? _commandClient; // Client for sending commands (port 10001)
-        private TcpClient? _dataClient;    // Client for receiving data (port 10000)
-        private Thread? _receiveThread;
-        private ConcurrentDictionary<string, JObject> _responseData;
-        private bool _isRunning;
-        private string? _ip;
+        // 基本配置
+        private string _ip = "127.0.0.1";
         private int _commandPort = 10001;
         private int _dataPort = 10000;
-        private readonly object _lockObj = new object();
         private readonly string _device;
         public ILogger _logger { get; set; }
+        
+        // TCP客户端
+        private TcpClient? _commandClient;  // 命令端口客户端 (10001)
+        private NetworkStream? _commandStream;
+        private TcpClient? _dataClient;     // 数据端口客户端 (10000)
+        private NetworkStream? _dataStream;
+        private Thread? _dataReceiveThread;
+        private bool _isRunning;
+        private readonly object _lockObj = new object();
+        
+        // 响应数据缓存
+        private ConcurrentDictionary<string, JObject> _responseData;
+        private JObject? _lastJointPositionData;
+        private JObject? _lastTcpPositionData;
+        private DateTime _lastDataReceiveTime;
 
         [ConfigParameter("设备ID")]
         public string DeviceId { get; set; }
@@ -41,20 +52,25 @@ namespace TCP.JAKA
         public bool IsConnected { get; private set; }
         
         [ConfigParameter("超时时间(毫秒)")]
-        public int Timeout { get; set; } = 3000;
+        public int Timeout { get; set; } = 5000;
         
         [ConfigParameter("最小周期(毫秒)")]
         public uint MinPeriod { get; set; } = 3000;
+        
+        // 调试开关
+        [ConfigParameter("调试模式")]
+        public bool DebugMode { get; set; } = true;
 
         public JAKADriver(string device, ILogger logger)
         {
             _device = device;
             _logger = logger;
-            _responseData = new ConcurrentDictionary<string, JObject>();
             DeviceId = device;
+            IsConnected = false;
+            _responseData = new ConcurrentDictionary<string, JObject>();
+            _lastDataReceiveTime = DateTime.MinValue;
 
             _logger.LogInformation($"Device:[{_device}],Create()");
-        
         }
 
         public bool CheckConfig(Dictionary<string, string> configDict)
@@ -64,18 +80,25 @@ namespace TCP.JAKA
                 configDict.ContainsKey("DataPort"))
             {
                 IP = configDict["IP"];
-                _ip = IP; // 保持兼容性
+                _ip = IP;
                 
                 if (int.TryParse(configDict["CommandPort"], out int commandPort))
                 {
                     CommandPort = commandPort;
-                    _commandPort = commandPort; // 保持兼容性
+                    _commandPort = commandPort;
                 }
                 
                 if (int.TryParse(configDict["DataPort"], out int dataPort))
                 {
                     DataPort = dataPort;
-                    _dataPort = dataPort; // 保持兼容性
+                    _dataPort = dataPort;
+                }
+                
+                // 检查调试模式
+                if (configDict.ContainsKey("DebugMode") && 
+                    bool.TryParse(configDict["DebugMode"], out bool debugMode))
+                {
+                    DebugMode = debugMode;
                 }
                 
                 return true;
@@ -96,67 +119,259 @@ namespace TCP.JAKA
         {
             try
             {
-                if (string.IsNullOrEmpty(IP))
-                {
-                    _logger.LogError("IP地址未设置");
-                    return false;
-                }
-
-                // 使用公共属性IP代替私有字段_ip
+                // 关闭可能存在的连接
+                Close();
+                
+                _logger.LogInformation($"正在连接JAKA机器人，IP：{IP}，命令端口：{CommandPort}，数据端口：{DataPort}");
+                
+                // 创建并连接命令客户端
                 _commandClient = new TcpClient();
+                _commandClient.ReceiveTimeout = Timeout;
+                _commandClient.SendTimeout = Timeout;
+                _commandClient.NoDelay = true; // 禁用Nagle算法，减少延迟
                 _commandClient.Connect(IP, CommandPort);
-
+                _commandStream = _commandClient.GetStream();
+                _logger.LogInformation($"命令客户端已连接到 {IP}:{CommandPort}");
+                
+                // 创建并连接数据客户端
                 _dataClient = new TcpClient();
+                _dataClient.ReceiveTimeout = Timeout;
+                _dataClient.SendTimeout = Timeout;
+                _dataClient.NoDelay = true;
                 _dataClient.Connect(IP, DataPort);
-
-                // 创建并启动数据接收线程
+                _dataStream = _dataClient.GetStream();
+                _logger.LogInformation($"数据客户端已连接到 {IP}:{DataPort}");
+                
+                // 启动数据接收线程
                 _isRunning = true;
-                _receiveThread = new Thread(ReceiveDataThread); // 修正方法名
-                _receiveThread.Start();
-
+                _dataReceiveThread = new Thread(DataReceiveThreadFunc);
+                _dataReceiveThread.IsBackground = true;
+                _dataReceiveThread.Start();
+                
+                // 等待数据接收线程启动
+                Thread.Sleep(200);
+                
+                // 发送测试命令
+                try
+                {
+                    _logger.LogInformation("发送测试命令 (get_joint_pos)...");
+                    
+                    JObject? response = SendCommand("get_joint_pos");
+                    if (response != null && response["errorCode"]?.ToString() == "0")
+                    {
+                        _logger.LogInformation("连接测试成功！");
+                        _lastJointPositionData = response;
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"连接测试异常: {(response == null ? "无响应" : response["errorMsg"])}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"连接测试异常: {ex.Message}");
+                    // 连接测试失败不影响返回结果
+                }
+                
                 IsConnected = true;
-                _logger.LogInformation($"Device:[{_device}],Connect()");
+                _logger.LogInformation($"Device:[{_device}],Connect成功");
                 return true;
             }
             catch (Exception ex)
             {
                 _logger.LogError($"Device:[{_device}],连接失败: {ex.Message}");
-                CloseConnections(); // 修正方法名
+                Close();
                 return false;
             }
         }
         
         public bool Close()
         {
-            CloseConnections();
             IsConnected = false;
+            
+            // 停止数据接收线程
+            _isRunning = false;
+            
+            if (_dataReceiveThread != null && _dataReceiveThread.IsAlive)
+            {
+                try
+                {
+                    _dataReceiveThread.Join(1000);
+                }
+                catch { }
+                _dataReceiveThread = null;
+            }
+            
+            // 关闭数据流和客户端
+            if (_dataStream != null)
+            {
+                try { _dataStream.Close(); } catch { }
+                _dataStream = null;
+            }
+            
+            if (_dataClient != null)
+            {
+                try { _dataClient.Close(); } catch { }
+                _dataClient = null;
+            }
+            
+            // 关闭命令流和客户端
+            if (_commandStream != null)
+            {
+                try { _commandStream.Close(); } catch { }
+                _commandStream = null;
+            }
+            
+            if (_commandClient != null)
+            {
+                try { _commandClient.Close(); } catch { }
+                _commandClient = null;
+            }
+            
+            _logger.LogInformation($"Device:[{_device}],Close()");
             return true;
         }
-
-        private void ReceiveDataThread()
+        
+        /// <summary>
+        /// 发送命令并等待响应
+        /// </summary>
+        private JObject? SendCommand(string cmdName)
         {
-            NetworkStream? stream = null;
+            lock (_lockObj) // 防止并发发送命令
+            {
+                if (_commandClient == null || _commandStream == null || !_commandClient.Connected)
+                {
+                    _logger.LogError("命令通道未初始化或已断开");
+                    return null;
+                }
+                
+                try
+                {
+                    // 构建命令
+                    string command = $"{{\"cmdName\":\"{cmdName}\"}}";
+                    
+                    if (DebugMode)
+                    {
+                        _logger.LogDebug($"发送命令: {command}");
+                    }
+                    
+                    // 确保命令结尾有换行符
+                    if (!command.EndsWith("\n"))
+                    {
+                        command += "\n";
+                    }
+                    
+                    // 发送命令
+                    byte[] sendData = Encoding.UTF8.GetBytes(command);
+                    _commandStream.Write(sendData, 0, sendData.Length);
+                    _commandStream.Flush();
+                    
+                    // 等待响应
+                    JObject? response = WaitForResponse(cmdName);
+                    
+                    // 如果没有收到响应，尝试重新发送一次
+                    if (response == null)
+                    {
+                        _logger.LogWarning($"未收到响应，重新发送命令: {cmdName}");
+                        _commandStream.Write(sendData, 0, sendData.Length);
+                        _commandStream.Flush();
+                        
+                        // 再次等待响应
+                        response = WaitForResponse(cmdName);
+                    }
+                    
+                    return response;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"发送命令异常: {ex.Message}");
+                    return null;
+                }
+            }
+        }
+        
+        /// <summary>
+        /// 等待指定命令的响应
+        /// </summary>
+        private JObject? WaitForResponse(string cmdName)
+        {
+            // 记录等待开始时间
+            DateTime startTime = DateTime.Now;
             
+            // 等待响应数据
+            while ((DateTime.Now - startTime).TotalMilliseconds < Timeout)
+            {
+                // 检查响应字典中是否有对应命令的响应
+                if (_responseData.TryRemove(cmdName, out JObject response))
+                {
+                    if (DebugMode)
+                    {
+                        _logger.LogDebug($"收到命令 {cmdName} 的响应: {response}");
+                    }
+                    return response;
+                }
+                
+                // 短暂等待，避免CPU占用
+                Thread.Sleep(10);
+            }
+            
+            _logger.LogWarning($"等待命令 {cmdName} 响应超时");
+            return null;
+        }
+        
+        /// <summary>
+        /// 数据接收线程函数
+        /// </summary>
+        private void DataReceiveThreadFunc()
+        {
             try
             {
-                if (_dataClient == null)
-                    return;
+                _logger.LogInformation("数据接收线程已启动");
                 
-                stream = _dataClient.GetStream();
+                if (_dataClient == null || _dataStream == null)
+                {
+                    _logger.LogError("数据通道未初始化");
+                    return;
+                }
+                
                 byte[] buffer = new byte[4096];
+                StringBuilder messageBuilder = new StringBuilder();
                 
                 while (_isRunning)
                 {
-                    if (_dataClient.Available > 0)
+                    try
                     {
-                        int bytesRead = stream.Read(buffer, 0, buffer.Length);
-                        if (bytesRead > 0)
+                        if (_dataClient.Available > 0)
                         {
-                            string response = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                            ProcessResponse(response);
+                            int bytesRead = _dataStream.Read(buffer, 0, buffer.Length);
+                            if (bytesRead > 0)
+                            {
+                                string data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                                
+                                if (DebugMode)
+                                {
+                                    _logger.LogDebug($"接收到数据 ({bytesRead} 字节): {data}");
+                                }
+                                
+                                // 添加数据到缓冲区
+                                messageBuilder.Append(data);
+                                
+                                // 处理可能的多个或部分JSON消息
+                                ProcessJsonMessages(messageBuilder);
+                                
+                                // 更新最后接收数据的时间
+                                _lastDataReceiveTime = DateTime.Now;
+                            }
                         }
+                        
+                        // 降低CPU使用率
+                        Thread.Sleep(10);
                     }
-                    Thread.Sleep(50);
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"数据接收异常: {ex.Message}");
+                        Thread.Sleep(100); // 出错后短暂暂停
+                    }
                 }
             }
             catch (Exception ex)
@@ -165,75 +380,103 @@ namespace TCP.JAKA
             }
             finally
             {
-                stream?.Close();
+                _logger.LogInformation("数据接收线程已退出");
             }
         }
-
-        private void ProcessResponse(string response)
+        
+        /// <summary>
+        /// 处理接收到的JSON消息
+        /// </summary>
+        private void ProcessJsonMessages(StringBuilder messageBuilder)
         {
-            try
+            string message = messageBuilder.ToString();
+            int startIndex = 0;
+            int processedIndex = 0;
+            
+            while (startIndex < message.Length)
             {
-                JObject responseObj = JObject.Parse(response);
-                string? cmdName = responseObj["cmdName"]?.ToString();
+                // 查找JSON开始位置
+                int jsonStart = message.IndexOf('{', startIndex);
+                if (jsonStart == -1) break;
                 
-                if (!string.IsNullOrEmpty(cmdName))
-                {
-                    _responseData[cmdName] = responseObj;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"解析响应数据失败: {ex.Message}");
-            }
-        }
-
-        private JObject SendCommand(string command)
-        {
-            lock (_lockObj)
-            {
+                // 查找匹配的JSON结束位置
+                int jsonEnd = FindMatchingBrace(message, jsonStart);
+                if (jsonEnd == -1) break;
+                
+                // 提取完整的JSON字符串
+                string jsonText = message.Substring(jsonStart, jsonEnd - jsonStart + 1);
+                
                 try
                 {
-                    if (_commandClient == null)
-                        throw new InvalidOperationException("命令客户端未初始化");
-                        
-                    // Extract command name
-                    JObject cmdObj = JObject.Parse(command);
-                    string? cmdName = cmdObj["cmdName"]?.ToString();
+                    // 解析JSON
+                    JObject jsonObj = JObject.Parse(jsonText);
+                    string? cmdName = jsonObj["cmdName"]?.ToString();
                     
-                    if (string.IsNullOrEmpty(cmdName))
-                        throw new Exception("无效的命令格式，缺少cmdName");
-
-                    // Clear previous response for this command
-                    _responseData.TryRemove(cmdName, out _);
-
-                    // Send command
-                    byte[] data = Encoding.UTF8.GetBytes(command);
-                    NetworkStream stream = _commandClient.GetStream();
-                    stream.Write(data, 0, data.Length);
-                    
-                    // Wait for response (with timeout)
-                    int timeout = Timeout;
-                    int elapsed = 0;
-                    int sleepTime = 50;
-                    
-                    while (elapsed < timeout)
+                    if (!string.IsNullOrEmpty(cmdName))
                     {
-                        if (_responseData.TryGetValue(cmdName, out JObject response))
+                        // 存储响应
+                        _responseData[cmdName] = jsonObj;
+                        
+                        // 根据命令类型缓存特定数据
+                        if (cmdName == "get_joint_pos" && jsonObj["errorCode"]?.ToString() == "0")
                         {
-                            return response;
+                            _lastJointPositionData = jsonObj;
+                        }
+                        else if (cmdName == "get_tcp_pos" && jsonObj["errorCode"]?.ToString() == "0")
+                        {
+                            _lastTcpPositionData = jsonObj;
                         }
                         
-                        Thread.Sleep(sleepTime);
-                        elapsed += sleepTime;
+                        if (DebugMode)
+                        {
+                            _logger.LogDebug($"处理命令 {cmdName} 的响应");
+                        }
                     }
-                    
-                    throw new TimeoutException($"命令 {cmdName} 等待响应超时");
                 }
                 catch (Exception ex)
                 {
-                    throw new Exception($"发送命令失败: {ex.Message}");
+                    if (DebugMode)
+                    {
+                        _logger.LogWarning($"JSON解析异常: {ex.Message}, 内容: {jsonText}");
+                    }
+                }
+                
+                // 更新处理位置
+                processedIndex = jsonEnd + 1;
+                startIndex = processedIndex;
+            }
+            
+            // 保留未处理的部分
+            if (processedIndex > 0)
+            {
+                messageBuilder.Remove(0, processedIndex);
+            }
+        }
+        
+        /// <summary>
+        /// 查找与指定位置的开括号匹配的闭括号
+        /// </summary>
+        private int FindMatchingBrace(string text, int openBraceIndex)
+        {
+            int count = 1; // 已找到一个开括号
+            
+            for (int i = openBraceIndex + 1; i < text.Length; i++)
+            {
+                if (text[i] == '{')
+                {
+                    count++;
+                }
+                else if (text[i] == '}')
+                {
+                    count--;
+                    if (count == 0)
+                    {
+                        return i; // 找到匹配的闭括号
+                    }
                 }
             }
+            
+            return -1; // 未找到匹配的闭括号
         }
 
         [Method("读取关节位置", description: "读取JAKA机器人的关节位置，可通过address指定具体关节索引(0-5)或属性")]
@@ -244,8 +487,28 @@ namespace TCP.JAKA
             try
             {
                 // 发送关节位置请求
-                string command = "{\"cmdName\":\"get_joint_pos\"}";
-                JObject response = SendCommand(command);
+                JObject? response = SendCommand("get_joint_pos");
+                
+                // 如果请求失败但有缓存数据，使用缓存
+                if (response == null)
+                {
+                    _logger.LogWarning("无法获取实时关节位置，尝试使用缓存");
+                    response = _lastJointPositionData;
+                    
+                    if (response == null)
+                    {
+                        ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                        ret.Message = "获取关节位置失败: 无响应且无缓存数据";
+                        return ret;
+                    }
+                    
+                    ret.Message = "使用缓存的关节位置数据";
+                }
+                else
+                {
+                    // 更新缓存
+                    _lastJointPositionData = response;
+                }
                 
                 if (response["errorCode"]?.ToString() == "0")
                 {
@@ -310,8 +573,28 @@ namespace TCP.JAKA
             try
             {
                 // 发送TCP位置请求
-                string command = "{\"cmdName\":\"get_tcp_pos\"}";
-                JObject response = SendCommand(command);
+                JObject? response = SendCommand("get_tcp_pos");
+                
+                // 如果请求失败但有缓存数据，使用缓存
+                if (response == null)
+                {
+                    _logger.LogWarning("无法获取实时TCP位置，尝试使用缓存");
+                    response = _lastTcpPositionData;
+                    
+                    if (response == null)
+                    {
+                        ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                        ret.Message = "获取TCP位置失败: 无响应且无缓存数据";
+                        return ret;
+                    }
+                    
+                    ret.Message = "使用缓存的TCP位置数据";
+                }
+                else
+                {
+                    // 更新缓存
+                    _lastTcpPositionData = response;
+                }
                 
                 if (response["errorCode"]?.ToString() == "0")
                 {
@@ -389,47 +672,47 @@ namespace TCP.JAKA
             }
         }
 
-    // 仍然保留原来的通用Read方法，但只是作为调度其他特定方法的入口
-    [Method("读取变量值", description: "读取JAKA机器人的值，支持关节位置(joint_pos)或TCP位置(tcp_pos)")]
-    public DriverReturnValueModel Read(DriverAddressIoArgModel ioarg)
-    {
-        // 检查address前缀来决定调用哪个方法
-        if (string.IsNullOrEmpty(ioarg.Address))
+        // 通用读取方法
+        [Method("读取变量值", description: "读取JAKA机器人的值，支持关节位置(joint_pos)或TCP位置(tcp_pos)")]
+        public DriverReturnValueModel Read(DriverAddressIoArgModel ioarg)
         {
-            return new DriverReturnValueModel 
-            { 
-                StatusType = VaribaleStatusTypeEnum.Bad, 
-                Message = "地址不能为空，请指定joint_pos或tcp_pos" 
-            };
-        }
-        
-        if (ioarg.Address.StartsWith("joint_pos", StringComparison.OrdinalIgnoreCase))
-        {
-            // 提取子地址（去掉前缀后的部分）
-            string subAddress = ioarg.Address.Length > "joint_pos".Length 
-                ? ioarg.Address.Substring("joint_pos".Length).TrimStart('.', '[', ']')
-                : "";
-                
-            return ReadJointPosition(new DriverAddressIoArgModel { Address = subAddress });
-        }
-        else if (ioarg.Address.StartsWith("tcp_pos", StringComparison.OrdinalIgnoreCase))
-        {
-            // 提取子地址（去掉前缀后的部分）
-            string subAddress = ioarg.Address.Length > "tcp_pos".Length 
-                ? ioarg.Address.Substring("tcp_pos".Length).TrimStart('.', '[', ']')
-                : "";
-                
-            return ReadTcpPosition(new DriverAddressIoArgModel { Address = subAddress });
-        }
-        else
-        {
-            return new DriverReturnValueModel
+            // 检查address前缀来决定调用哪个方法
+            if (string.IsNullOrEmpty(ioarg.Address))
             {
-                StatusType = VaribaleStatusTypeEnum.Bad,
-                Message = $"不支持的地址: {ioarg.Address}，请使用joint_pos或tcp_pos开头的地址"
-            };
+                return new DriverReturnValueModel 
+                { 
+                    StatusType = VaribaleStatusTypeEnum.Bad, 
+                    Message = "地址不能为空，请指定joint_pos或tcp_pos" 
+                };
+            }
+            
+            if (ioarg.Address.StartsWith("joint_pos", StringComparison.OrdinalIgnoreCase))
+            {
+                // 提取子地址（去掉前缀后的部分）
+                string subAddress = ioarg.Address.Length > "joint_pos".Length 
+                    ? ioarg.Address.Substring("joint_pos".Length).TrimStart('.', '[', ']')
+                    : "";
+                    
+                return ReadJointPosition(new DriverAddressIoArgModel { Address = subAddress });
+            }
+            else if (ioarg.Address.StartsWith("tcp_pos", StringComparison.OrdinalIgnoreCase))
+            {
+                // 提取子地址（去掉前缀后的部分）
+                string subAddress = ioarg.Address.Length > "tcp_pos".Length 
+                    ? ioarg.Address.Substring("tcp_pos".Length).TrimStart('.', '[', ']')
+                    : "";
+                    
+                return ReadTcpPosition(new DriverAddressIoArgModel { Address = subAddress });
+            }
+            else
+            {
+                return new DriverReturnValueModel
+                {
+                    StatusType = VaribaleStatusTypeEnum.Bad,
+                    Message = $"不支持的地址: {ioarg.Address}，请使用joint_pos或tcp_pos开头的地址"
+                };
+            }
         }
-    }
 
         public Task<DriverReturnValueModel> ReadAsync(DriverAddressIoArgModel ioarg)
         {
@@ -438,7 +721,7 @@ namespace TCP.JAKA
 
         public DriverReturnValueModel Write(string deviceId, string value, DriverAddressIoArgModel ioarg)
         {
-            // For now, just implement a read-only driver
+            // 暂不支持写入操作
             return new DriverReturnValueModel
             {
                 StatusType = VaribaleStatusTypeEnum.Bad,
@@ -449,7 +732,7 @@ namespace TCP.JAKA
 
         public Task<RpcResponse> WriteAsync(string deviceId, string value, DriverAddressIoArgModel ioarg)
         {
-            // 简化实现，不支持写入操作
+            // 暂不支持写入操作
             return Task.FromResult(new RpcResponse
             {
                 IsSuccess = false,
@@ -459,24 +742,43 @@ namespace TCP.JAKA
 
         public void Dispose()
         {
-            CloseConnections();
+            Close();
         }
-
-        private void CloseConnections()
+        
+        [Method("手动发送命令", description: "手动发送命令给JAKA机器人并获取响应")]
+        public DriverReturnValueModel ManualCommand(DriverAddressIoArgModel ioarg)
         {
-            _isRunning = false;
+            var ret = new DriverReturnValueModel { StatusType = VaribaleStatusTypeEnum.Good, Message = string.Empty };
             
-            if (_receiveThread != null && _receiveThread.IsAlive)
+            try
             {
-                try { _receiveThread.Join(1000); } catch { }
-                _receiveThread = null;
+                string cmdName = ioarg.Address;
+                
+                if (string.IsNullOrEmpty(cmdName))
+                {
+                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                    ret.Message = "命令名称不能为空";
+                    return ret;
+                }
+                
+                JObject? response = SendCommand(cmdName);
+                
+                if (response == null)
+                {
+                    ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                    ret.Message = $"发送命令 {cmdName} 失败: 无响应或响应超时";
+                    return ret;
+                }
+                
+                ret.Value = response.ToString();
+                return ret;
             }
-            
-            _commandClient?.Close();
-            _commandClient = null;
-            
-            _dataClient?.Close();
-            _dataClient = null;
+            catch (Exception ex)
+            {
+                ret.StatusType = VaribaleStatusTypeEnum.Bad;
+                ret.Message = $"发送命令异常: {ex.Message}";
+                return ret;
+            }
         }
     }
 }
